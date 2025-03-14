@@ -140,3 +140,6 @@ Debug/
 Release/
 build_x86_64_debug/
 build_x86_64_release/
+
+## preset
+CMakePresets.json
