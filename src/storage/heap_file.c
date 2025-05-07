@@ -5266,7 +5266,7 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
   INT16 slotid;
   int sp_success;
   int i;
-  FILE_DESCRIPTORS des;
+  FILE_DESCRIPTORS des; ///////////////////////////////////////////////// des는 많은 oid를 담는데 무슨 역할을 하는걸까?
   const FILE_TYPE file_type = reuse_oid ? FILE_HEAP_REUSE_SLOTS : FILE_HEAP;
   PAGE_TYPE ptype = PAGE_HEAP;
   OID null_oid = OID_INITIALIZER;
@@ -5287,6 +5287,7 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
   memset (&des, 0, sizeof (des));
 
   if (prm_get_bool_value (PRM_ID_DONT_REUSE_HEAP_FILE) == false && file_type == FILE_HEAP)
+  // create table의 경우에는 file_type이 FILE_HEAP_REUSE_SLOTS여서 조건문 해당 안 됨
     {
       /*
        * Try to reuse an already mark deleted heap file
@@ -5322,7 +5323,8 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
    * new, and the file is going to be removed in the event of a crash.
    */
 
-  error_code = file_create_heap (thread_p, reuse_oid, class_oid, &hfid->vfid);
+  error_code = file_create_heap (thread_p, reuse_oid, class_oid, &hfid->vfid); // file_manager.c 호출 -> disk에 file을 확보받고 file_id 할당
+  // hfid->vfid->fileid가 정해짐
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -5330,7 +5332,9 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
     }
 
   error_code = file_alloc_sticky_first_page (thread_p, &hfid->vfid, file_init_page_type, &ptype, &vpid,
-					     &addr_hdr.pgptr);
+					     &addr_hdr.pgptr); // 위에서 받은 file_id로 vpid 할당(우연인지 모르겠으나 공교롭게도 file_id + 1임)
+               // vpid->pageid와 addr_hdr.pgptr가 정해짐
+               // hfid->vfid에 접근해서 vpid_sticky_first값을 vpid의 주소로 바꿔줌
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -5363,12 +5367,12 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
       goto error;
     }
 
-  (void) heap_stats_del_bestspace_by_hfid (thread_p, hfid);
+  (void) heap_stats_del_bestspace_by_hfid (thread_p, hfid); // file(hfid)이 새로 만들어졌으니 bestspace에서 필요 없는 대상을 제거하고 최적화해줌
 
   pgbuf_set_page_ptype (thread_p, addr_hdr.pgptr, PAGE_HEAP);
 
   /* Initialize header page */
-  spage_initialize (thread_p, addr_hdr.pgptr, heap_get_spage_type (), HEAP_MAX_ALIGN, SAFEGUARD_RVSPACE);
+  spage_initialize (thread_p, addr_hdr.pgptr, heap_get_spage_type (), HEAP_MAX_ALIGN, SAFEGUARD_RVSPACE); //vpid->pageid에 해당하는 spage 초기화
 
   /* Now insert header */
   memset (&heap_hdr, 0, sizeof (heap_hdr));
@@ -5416,7 +5420,7 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
   recdes.type = REC_HOME;
   recdes.data = (char *) &heap_hdr;
 
-  sp_success = spage_insert (thread_p, addr_hdr.pgptr, &recdes, &slotid);
+  sp_success = spage_insert (thread_p, addr_hdr.pgptr, &recdes, &slotid); // heap file 생성하면서 만든 heap header(addr_hdr.pgptr == vpid->pageid)를 slotted page로 insert 해주기
   if (sp_success != SP_SUCCESS || slotid != HEAP_HEADER_AND_CHAIN_SLOTID)
     {
       assert (false);
@@ -5439,14 +5443,14 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
        */
       addr_hdr.vfid = &hfid->vfid;
       addr_hdr.offset = HEAP_HEADER_AND_CHAIN_SLOTID;
-      log_append_redo_data (thread_p, RVHF_CREATE_HEADER, &addr_hdr, sizeof (heap_hdr), &heap_hdr);
+      log_append_redo_data (thread_p, RVHF_CREATE_HEADER, &addr_hdr, sizeof (heap_hdr), &heap_hdr); // log 남기기
       pgbuf_set_dirty (thread_p, addr_hdr.pgptr, FREE);
       addr_hdr.pgptr = NULL;
     }
 
 end:
   /* apply TDE to created heap file if needed */
-  if (heap_get_class_tde_algorithm (thread_p, class_oid, &tde_algo) == NO_ERROR)
+  if (heap_get_class_tde_algorithm (thread_p, class_oid, &tde_algo) == NO_ERROR) // 생성한 heap file disk에 내리기 위해 암호화 진행
     {
       error_code = file_apply_tde_algorithm (thread_p, &hfid->vfid, tde_algo);
       if (error_code != NO_ERROR)
@@ -10818,7 +10822,7 @@ heap_get_class_tde_algorithm (THREAD_ENTRY * thread_p, const OID * class_oid, TD
       return error;
     }
 
-  error = heap_scancache_quick_start_root_hfid (thread_p, &scan_cache);
+  error = heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // heap file을 create한 시점에도 cache에 올려서 작업을 해야 하니 scancache가 필요한 것 같음
   if (error != NO_ERROR)
     {
       return error;
@@ -19655,7 +19659,7 @@ heap_scancache_quick_start_root_hfid (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * 
   HFID root_hfid;
 
   (void) boot_find_root_heap (&root_hfid);
-  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid);
+  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scancache에 적용
   scan_cache->page_latch = S_LOCK;
 
   return NO_ERROR;
@@ -20409,13 +20413,13 @@ heap_insert_handle_multipage_record (THREAD_ENTRY * thread_p, HEAP_OPERATION_CON
   assert (context->recdes_p != NULL);
 
   /* check for big record */
-  if (!heap_is_big_length (context->recdes_p->length))
+  if (!heap_is_big_length (context->recdes_p->length)) // insert하려는 데이터가 overflow 대상인지 검사하고, overflow가 아니면 return
     {
       return NO_ERROR;
     }
 
   /* insert overflow record */
-  if (heap_ovf_insert (thread_p, &context->hfid, &context->ovf_oid, context->recdes_p) == NULL)
+  if (heap_ovf_insert (thread_p, &context->hfid, &context->ovf_oid, context->recdes_p) == NULL) // overflow 전용 insert 수행
     {
       return ER_FAILED;
     }
@@ -23044,7 +23048,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   assert (!HFID_IS_NULL (&context->hfid));
 
   context->time_track = &time_track;
-  HEAP_PERF_START (thread_p, context);
+  HEAP_PERF_START (thread_p, context); // 성능측정 시작을 위해서 시간 등을 등록하는 매크로 함수로, heap insert에서는 중요하지 않음
 
   /* check scancache */
   if (heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p) !=
@@ -23077,6 +23081,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
       && context->recdes_p->type != REC_ASSIGN_ADDRESS)
     {
       if (heap_insert_adjust_recdes_header (thread_p, context, is_mvcc_class) != NO_ERROR)
+      // record의 header를 insert 연산에 맞게 조정하는 것 같지만, 별거 안 함
 	{
 	  return ER_FAILED;
 	}

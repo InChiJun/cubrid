@@ -3133,6 +3133,7 @@ disk_get_volheader_internal (THREAD_ENTRY * thread_p, VOLID volid, PGBUF_LATCH_M
 #endif				/* !NDEBUG */
   )
 {
+  ////// page buffer에 요청해서 메모리에 volume page header fix
   VPID vpid_volheader;
   int error_code = NO_ERROR;
 
@@ -3961,7 +3962,7 @@ disk_reserve_sectors_in_volume (THREAD_ENTRY * thread_p, int vol_index, DISK_RES
   assert (context->nsects_lastvol_remaining > 0);
 
   /* fix volume header */
-  error_code = disk_get_volheader (thread_p, volid, PGBUF_LATCH_WRITE, &page_volheader, &volheader);
+  error_code = disk_get_volheader (thread_p, volid, PGBUF_LATCH_WRITE, &page_volheader, &volheader); // page buffer에 접근해서 memory에 올림
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -3976,7 +3977,7 @@ disk_reserve_sectors_in_volume (THREAD_ENTRY * thread_p, int vol_index, DISK_RES
     {
       /* start with hinted sector */
       DISK_SECTS_ASSERT_ROUNDED (volheader->hint_allocsect);
-      disk_stab_cursor_set_at_sectid (volheader, volheader->hint_allocsect, &start_cursor);
+      disk_stab_cursor_set_at_sectid (volheader, volheader->hint_allocsect, &start_cursor); // cursor는 disk 내에서 추적하고 있는 index같은 위치를 나타냄
       disk_stab_cursor_set_at_end (volheader, &end_cursor);
 
       /* reserve sectors after hint */
@@ -4222,7 +4223,7 @@ retry:
 
   for (iter = 0; iter < context.n_cache_vol_reserve; iter++)
     {
-      error_code = disk_reserve_sectors_in_volume (thread_p, iter, &context);
+      error_code = disk_reserve_sectors_in_volume (thread_p, iter, &context); // volume 내의 sector는 고정된 공간을 확보하고 주소값을 받아서 쓸 텐데 reserve는 왜 할까? 공용으로 사용되는 공간인가?
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();

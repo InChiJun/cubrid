@@ -3106,7 +3106,7 @@ file_create_with_npages (THREAD_ENTRY * thread_p, FILE_TYPE file_type, int npage
 
   assert (npages > 0);
 
-  FILE_TABLESPACE_FOR_PERM_NPAGES (&tablespace, npages);
+  FILE_TABLESPACE_FOR_PERM_NPAGES (&tablespace, npages); // tablespace의 초기값 설정
 
   return file_create (thread_p, file_type, &tablespace, des, false, false, vfid);
 }
@@ -3372,7 +3372,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
   n_sectors = (int) CEIL_PTVDIV (total_size, DB_SECTORSIZE);
   assert (n_sectors > 0);
   /* allocate a buffer to store all reserved sectors */
-  vsids_reserved = (VSID *) db_private_alloc (thread_p, n_sectors * sizeof (VSID));
+  vsids_reserved = (VSID *) db_private_alloc (thread_p, n_sectors * sizeof (VSID)); // vol, sector id 할당받을 구조체 메모리 할당(reserve 목적으로 할당받는 것 같음)
   if (vsids_reserved == NULL)
     {
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1, n_sectors * sizeof (VSID));
