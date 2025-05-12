@@ -20277,7 +20277,7 @@ heap_update_adjust_recdes_header (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEX
        */
       assert (!(mvcc_flags & OR_MVCC_FLAG_VALID_DELID));
       mvcc_id = logtb_get_current_mvccid (thread_p);
-      start_p = update_context->recdes_p->data;
+      start_p = update_context->recdes_p->data; // data 주소를 start_p에 넣어줌
 
       /* Skip bytes up to insid_offset */
       new_ins_mvccid_pos_p = start_p + OR_MVCC_INSERT_ID_OFFSET;
@@ -20690,10 +20690,10 @@ heap_insert_newhome (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * parent_co
 
   /* build insert context */
   heap_create_insert_context (&ins_context, &parent_context->hfid, &parent_context->class_oid, recdes_p, NULL);
-
+  // newhome을 위한 새로운 context 만듦
   /* physical insertion */
   error_code = heap_find_location_and_insert_rec_newhome (thread_p, &ins_context);
-  if (error_code != NO_ERROR)
+  if (error_code != NO_ERROR) // newhome에 데이터 삽입
     {
       ASSERT_ERROR ();
       return error_code;
@@ -20897,7 +20897,7 @@ heap_get_record_location (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * cont
   vpid.volid = context->oid.volid;
 
   /* first try to retrieve cached fixed page from scancache */
-  if (context->scan_cache_p != NULL && context->scan_cache_p->page_watcher.pgptr != NULL
+  if (context->scan_cache_p != NULL && context->scan_cache_p->page_watcher.pgptr != NULL // pgbuf에서 vpid 가져오기(실패할 수 있음)
       && context->scan_cache_p->cache_last_fix_page == true)
     {
       VPID *vpid_incache_p = pgbuf_get_vpid_ptr (context->scan_cache_p->page_watcher.pgptr);
@@ -22314,9 +22314,9 @@ heap_update_relocation (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * contex
     }
 
   /* fix header if necessary */
-  fits_in_home =
+  fits_in_home = // 1번 경우와
     spage_is_updatable (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid, context->recdes_p->length);
-  fits_in_forward =
+  fits_in_forward = // 2번 경우의 차이를 모르겠음
     spage_is_updatable (thread_p, context->forward_page_watcher_p->pgptr, forward_oid.slotid,
 			context->recdes_p->length);
   if (heap_is_big_length (context->recdes_p->length) || (!fits_in_forward && !fits_in_home))
@@ -22685,7 +22685,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
     }
   else if (!spage_is_updatable (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid,
 				context->recdes_p->length))
-    {
+    { // home 업데이트하려고 들어왔는데 사이즈가 초과하면 newhome으로 전환
       /* insert new home */
 
       if (is_mvcc_op)
@@ -23460,14 +23460,14 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
 
   /* check scancache */
   rc = heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p);
-  if (rc != NO_ERROR)
+  if (rc != NO_ERROR) // scancache에 현재 hfid가 존재하는지 검사하는 것 같은데, 존재하지 않을 경우가 없다고 보면 됨
     {
       ASSERT_ERROR ();
       return rc;
     }
 
   /* check file type */
-  context->file_type = heap_get_file_type (thread_p, context);
+  context->file_type = heap_get_file_type (thread_p, context); // update에서는 FILE_HEAP_REUSE_SLOTS
   if (context->file_type != FILE_HEAP && context->file_type != FILE_HEAP_REUSE_SLOTS)
     {
       if (context->file_type == FILE_UNKNOWN_TYPE)
@@ -23499,7 +23499,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
     }
 
   /* check provided object identifier */
-  rc = heap_is_valid_oid (thread_p, &context->oid);
+  rc = heap_is_valid_oid (thread_p, &context->oid); // oid가 valid한지 체크
   if (rc != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -23507,7 +23507,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
     }
 
   /* by default, consider it old */
-  context->is_logical_old = true;
+  context->is_logical_old = true; // 걍 default값 설정해주는 듯
 
   is_mvcc_class = !mvcc_is_mvcc_disabled_class (&context->class_oid);
   /*
@@ -23527,7 +23527,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Get location
    */
-  rc = heap_get_record_location (thread_p, context);
+  rc = heap_get_record_location (thread_p, context); // context에 class_oid 할당
   if (rc != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -23536,6 +23536,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
 
   /* decache guessed representation */
   HEAP_MAYNEED_DECACHE_GUESSED_LASTREPRS (&context->oid, &context->hfid);
+  // cache에서 class_oid를 해제함. update할 내용이니 빼는 것 같음
 
   /*
    * Fetch record
@@ -23564,7 +23565,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   if (!OID_ISNULL (&context->class_oid) && !OID_IS_ROOTOID (&context->class_oid))
     {
       rc = heap_update_adjust_recdes_header (thread_p, context, is_mvcc_class);
-      if (rc != NO_ERROR)
+      if (rc != NO_ERROR) // update에 맞게 header 조정. 주로 MVCC 헤더값 설정해주는 듯
 	{
 	  ASSERT_ERROR ();
 	  goto exit;
@@ -23597,7 +23598,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
    */
   switch (context->record_type)
     {
-    case REC_RELOCATION:
+    case REC_RELOCATION: // 이전 데이터가 REC_RELOCATION일 때(REC_RELOCATION이면 REC_RELOCATION밖에 안 됨)
       rc = heap_update_relocation (thread_p, context, is_mvcc_op);
       break;
 
