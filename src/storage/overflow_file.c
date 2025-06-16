@@ -109,13 +109,13 @@ overflow_insert (THREAD_ENTRY * thread_p, const VFID * ovf_vfid, VPID * ovf_vpid
   /*
    * Guess the number of pages. The total number of pages is found by dividing length by page size - the smallest
    * header. Then, we make sure that this estimate is correct. */
-  length = recdes->length - (DB_PAGESIZE - (int) offsetof (OVERFLOW_FIRST_PART, data));
-  if (length > 0)
+  length = recdes->length - (DB_PAGESIZE - (int) offsetof (OVERFLOW_FIRST_PART, data)); // length = (record 전체 길이) - (페이지 사이즈) - (첫페이지 헤더 사이즈)
+  if (length > 0) // 첫 페이지(헤더부분을 제외한)에 다 안 들어간다면
     {
-      i = DB_PAGESIZE - offsetof (OVERFLOW_REST_PART, data);
-      npages = 1 + CEIL_PTVDIV (length, i);
+      i = DB_PAGESIZE - offsetof (OVERFLOW_REST_PART, data); // 두 번째 페이지부터는 헤더 사이즈가 4바이트 작아짐
+      npages = 1 + CEIL_PTVDIV (length, i); // 페이지 개수 계산
     }
-  else
+  else // 첫 페이지(헤더부분을 제외한)에 다 들어간다면 페이지는 하나만 있어도 됨
     {
       npages = 1;
     }
@@ -137,16 +137,16 @@ overflow_insert (THREAD_ENTRY * thread_p, const VFID * ovf_vfid, VPID * ovf_vpid
 #if !defined(NDEBUG)
   for (i = 0; i < npages; i++)
     {
-      VPID_SET_NULL (&vpids[i]);
+      VPID_SET_NULL (&vpids[i]); // page 수 만큼 vpid들 NULL(-1)로 초기화
     }
 #endif
 
-  VPID_SET_NULL (&vpids[npages]);
+  VPID_SET_NULL (&vpids[npages]); // vpids에서 활용할 공간 + 1 NULL로 초기화
 
   log_sysop_start (thread_p);
   is_sysop_started = true;
 
-  error_code = file_alloc_multiple (thread_p, ovf_vfid,
+  error_code = file_alloc_multiple (thread_p, ovf_vfid, // 필요한 page 수만큼 페이지 할당
 				    file_type != FILE_TEMP ? file_init_page_type : file_init_temp_page_type, &ptype,
 				    npages, vpids);
   if (error_code != NO_ERROR)

@@ -310,7 +310,7 @@ typedef struct heap_classrepr_entry HEAP_CLASSREPR_ENTRY;
 struct heap_classrepr_entry
 {
   pthread_mutex_t mutex;
-  int idx;			/* Cache index. Used to pass the index when a class representation is in the cache */
+  int idx;			/* Cache index. Used to pass the index when a classepr resentation is in the cache */
   int fcnt;			/* How many times this structure has been fixed. It cannot be deallocated until this
 				 * value is zero.  */
   int zone;			/* ZONE_VOID, ZONE_LRU, ZONE_FREE */
@@ -1861,7 +1861,7 @@ heap_classrepr_decache (THREAD_ENTRY * thread_p, const OID * class_oid)
  * Note: This function is called at recovery.
  */
 int
-heap_classrepr_restart_cache (void)
+heap_classrepr_restart_cache (void) // 비정상으로 재시작됐을 때 class representation cache를 초기화해줌
 {
   int ret;
 
@@ -3542,7 +3542,7 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
   addr_hdr.vfid = &hfid->vfid;
   addr_hdr.offset = HEAP_HEADER_AND_CHAIN_SLOTID;
 
-  error_code = pgbuf_ordered_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, &hdr_page_watcher);
+  error_code = pgbuf_ordered_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, &hdr_page_watcher); // page 자체를 fix
   if (error_code != NO_ERROR)
     {
       /* something went wrong. Unable to fetch header page */
@@ -3556,15 +3556,15 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
 #endif /* !NDEBUG */
 
   if (spage_get_record (thread_p, hdr_page_watcher.pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &hdr_recdes, PEEK) != S_SUCCESS)
-    {
+    { // page에서 slotid에 해당하는 데이터를 hdr_recdes에 할당(peek/copy)하는 함수이고 여기서는 heap_header를 가져옴
       assert (false);
       pgbuf_ordered_unfix (thread_p, &hdr_page_watcher);
       goto error;
     }
 
-  heap_hdr = (HEAP_HDR_STATS *) hdr_recdes.data;
+  heap_hdr = (HEAP_HDR_STATS *) hdr_recdes.data; // hdr_recdes.data에는 heap_header가 있음
 
-  if (isnew_rec == true)
+  if (isnew_rec == true) // rec_type이 NEWHOME인지 체크
     {
       heap_hdr->estimates.num_recs += 1;
       if (newrec_size > DB_PAGESIZE)
@@ -5167,7 +5167,7 @@ heap_vpid_prev (THREAD_ENTRY * thread_p, const HFID * hfid, PAGE_PTR pgptr, VPID
  */
 int
 heap_manager_initialize (void)
-{
+{ // 1. chn 초기화 2. class representation cache 초기화 3. heap bestspace cache 초기화 4. hfid table 초기화
   int ret;
 
 #define HEAP_MAX_FIRSTSLOTID_LENGTH (sizeof (HEAP_HDR_STATS))
@@ -5208,7 +5208,7 @@ heap_manager_initialize (void)
  */
 int
 heap_manager_finalize (void)
-{
+{ // 1. chn 해제 2. class representation cache 해제 3. heap bestspace cache 해제 4. hfid table 해제
   int ret;
 
   ret = heap_chnguess_finalize ();
@@ -5420,7 +5420,7 @@ heap_create_internal (THREAD_ENTRY * thread_p, HFID * hfid, const OID * class_oi
   recdes.type = REC_HOME;
   recdes.data = (char *) &heap_hdr;
 
-  sp_success = spage_insert (thread_p, addr_hdr.pgptr, &recdes, &slotid); // heap file 생성하면서 만든 heap header(addr_hdr.pgptr == vpid->pageid)를 slotted page로 insert 해주기
+  sp_success = spage_insert (thread_p, addr_hdr.pgptr, &recdes, &slotid); // heap file 생성하면서 만든 heap header를 slotted page 첫 page로 insert 해주기
   if (sp_success != SP_SUCCESS || slotid != HEAP_HEADER_AND_CHAIN_SLOTID)
     {
       assert (false);
@@ -6010,19 +6010,19 @@ heap_assign_address (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid
   RECDES recdes;
   int rc;
 
-  if (expected_length <= 0)
+  if (expected_length <= 0) // expected_length가 0일 때가 있고 아닐 때가 있음(heap_assign_address() 함수가 두 번 호출됨) 둘 다 다른 페이지에 할당
     {
-      rc = heap_estimate_avg_length (thread_p, hfid, recdes.length);
+      rc = heap_estimate_avg_length (thread_p, hfid, recdes.length); // recdes.length에 전체 record 길이의 평균이 반환됨
       if (rc != NO_ERROR)
 	{
 	  return rc;
 	}
 
-      if (recdes.length > (-expected_length))
+      if (recdes.length > (-expected_length)) // 아마 expected_length >= 0인 경우에 record 평균 길이 삽입하려는 것 같음
 	{
 	  expected_length = recdes.length;
 	}
-      else
+      else // expected_length < 0인 경우(이 조건이 뭘 의도한지는 모르겠음)
 	{
 	  expected_length = -expected_length;
 	}
@@ -6035,6 +6035,8 @@ heap_assign_address (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid
    * of an OID as the length.
    */
 
+  // 두 가지 경우 1. OID < size < page 크기 -> expected_length
+  // 2. OID > size 이거나 size > page 크기 -> OID size(8)
   recdes.length =
     ((expected_length > SSIZEOF (OID) && !heap_is_big_length (expected_length)) ? expected_length : SSIZEOF (OID));
 
@@ -6042,17 +6044,17 @@ heap_assign_address (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid
   recdes.type = REC_ASSIGN_ADDRESS;
 
   /* create context */
-  heap_create_insert_context (&insert_context, (HFID *) hfid, class_oid, &recdes, NULL);
+  heap_create_insert_context (&insert_context, (HFID *) hfid, class_oid, &recdes, NULL); // record insert를 위한 context 생성
 
   /* insert */
-  rc = heap_insert_logical (thread_p, &insert_context, NULL);
+  rc = heap_insert_logical (thread_p, &insert_context, NULL); // REC_ASSIGN_ADDRESS 타입 데이터 삽입(길이가 8보다 큰 경우도 있음)
   if (rc != NO_ERROR)
     {
       return rc;
     }
 
   /* get result and exit */
-  COPY_OID (oid, &insert_context.res_oid);
+  COPY_OID (oid, &insert_context.res_oid); // oid에 context.res_oid copy
   return NO_ERROR;
 }
 
@@ -6465,7 +6467,7 @@ heap_ovf_find_vfid (THREAD_ENTRY * thread_p, const HFID * hfid, VFID * ovf_vfid,
 
   /* Read the header page */
   vpid.volid = hfid->vfid.volid;
-  vpid.pageid = hfid->hpgid;
+  vpid.pageid = hfid->hpgid; // vpid는 hfid 받아옴
 
   mode = (docreate == true ? PGBUF_LATCH_WRITE : PGBUF_LATCH_READ);
   addr_hdr.pgptr = pgbuf_fix (thread_p, &vpid, OLD_PAGE, mode, latch_cond);
@@ -6481,7 +6483,7 @@ heap_ovf_find_vfid (THREAD_ENTRY * thread_p, const HFID * hfid, VFID * ovf_vfid,
 
   /* Peek the header record */
 
-  if (spage_get_record (thread_p, addr_hdr.pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &hdr_recdes, PEEK) != S_SUCCESS)
+  if (spage_get_record (thread_p, addr_hdr.pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &hdr_recdes, PEEK) != S_SUCCESS) // heap_header 데이터 hdr_recdes에 삽입
     {
       pgbuf_unfix_and_init (thread_p, addr_hdr.pgptr);
       return NULL;
@@ -6526,7 +6528,7 @@ heap_ovf_find_vfid (THREAD_ENTRY * thread_p, const HFID * hfid, VFID * ovf_vfid,
 
 	  /* Log undo, then redo */
 	  log_append_undo_data (thread_p, RVHF_STATS, &addr_hdr, sizeof (*heap_hdr), heap_hdr);
-	  VFID_COPY (&heap_hdr->ovf_vfid, ovf_vfid);
+	  VFID_COPY (&heap_hdr->ovf_vfid, ovf_vfid); // ovf_vfid에 생성한 주소값 heap header 필드에 저장
 	  log_append_redo_data (thread_p, RVHF_STATS, &addr_hdr, sizeof (*heap_hdr), heap_hdr);
 	  pgbuf_set_dirty (thread_p, addr_hdr.pgptr, DONT_FREE);
 
@@ -6545,7 +6547,7 @@ heap_ovf_find_vfid (THREAD_ENTRY * thread_p, const HFID * hfid, VFID * ovf_vfid,
 exit:
   pgbuf_unfix_and_init (thread_p, addr_hdr.pgptr);
 
-  return ovf_vfid;
+  return ovf_vfid; // 할당한 ovf_vfid 반환
 }
 
 /*
@@ -6563,8 +6565,8 @@ heap_ovf_insert (THREAD_ENTRY * thread_p, const HFID * hfid, OID * ovf_oid, RECD
   VFID ovf_vfid;
   VPID ovf_vpid;		/* Address of overflow insertion */
 
-  if (heap_ovf_find_vfid (thread_p, hfid, &ovf_vfid, true, PGBUF_UNCONDITIONAL_LATCH) == NULL
-      || overflow_insert (thread_p, &ovf_vfid, &ovf_vpid, recdes, FILE_MULTIPAGE_OBJECT_HEAP) != NO_ERROR)
+  if (heap_ovf_find_vfid (thread_p, hfid, &ovf_vfid, true, PGBUF_UNCONDITIONAL_LATCH) == NULL // 삽입할 ovf_vfid 얻어오기
+      || overflow_insert (thread_p, &ovf_vfid, &ovf_vpid, recdes, FILE_MULTIPAGE_OBJECT_HEAP) != NO_ERROR) // 
     {
       return NULL;
     }
@@ -7917,9 +7919,9 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 
   PGBUF_INIT_WATCHER (&old_page_watcher, PGBUF_ORDERED_HEAP_NORMAL, hfid);
 
-  if (OID_ISNULL (next_oid))
+  if (OID_ISNULL (next_oid)) // 주어진 next_oid가 null이면
     {
-      if (reversed_direction)
+      if (reversed_direction) // 마지막부터 scan
 	{
 	  /* Retrieve the last record of the file. */
 	  if (heap_get_last_vpid (thread_p, hfid, &vpid) != NO_ERROR)
@@ -7931,7 +7933,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	  oid.pageid = vpid.pageid;
 	  oid.slotid = NULL_SLOTID;
 	}
-      else
+      else // 처음부터 scan
 	{
 	  /* Retrieve the first object of the heap */
 	  oid.volid = hfid->vfid.volid;
@@ -7972,7 +7974,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	  if (scan_cache->page_watcher.pgptr == NULL)
 	    {
 	      scan_cache->page_watcher.pgptr =
-		heap_scan_pb_lock_and_fetch (thread_p, &vpid, OLD_PAGE_PREVENT_DEALLOC, S_LOCK, scan_cache,
+		heap_scan_pb_lock_and_fetch (thread_p, &vpid, OLD_PAGE_PREVENT_DEALLOC, S_LOCK, scan_cache, // vpid fix, S_LOCK
 					     &scan_cache->page_watcher);
 	      if (old_page_watcher.pgptr != NULL)
 		{
@@ -8828,7 +8830,7 @@ heap_scanrange_last (THREAD_ENTRY * thread_p, OID * last_oid, RECDES * recdes, H
  * passed, the function finds the class oid.
  */
 bool
-heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid)
+heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // csql 실행할 때도 호출됨
 {
   VPID vpid;
   OID tmp_oid;
@@ -8840,8 +8842,8 @@ heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid)
 
   PGBUF_INIT_WATCHER (&pg_watcher, PGBUF_ORDERED_HEAP_NORMAL, PGBUF_ORDERED_NULL_HFID);
 
-  old_check_interrupt = logtb_set_check_interrupt (thread_p, false);
-  old_wait_msec = xlogtb_reset_wait_msecs (thread_p, LK_INFINITE_WAIT);
+  old_check_interrupt = logtb_set_check_interrupt (thread_p, false); // interrupt 발생 여부
+  old_wait_msec = xlogtb_reset_wait_msecs (thread_p, LK_INFINITE_WAIT); // 얼나 대기할지 나타내는 것 같음
 
   if (HEAP_ISVALID_OID (thread_p, oid) != DISK_VALID)
     {
@@ -9122,7 +9124,7 @@ heap_get_num_objects (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, i
  */
 int
 heap_estimate (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, int *nobjs, int *avg_length)
-{
+{ // 1. page 수 반환=npages 2. record 수 반환=npages 3. 전체 record의 평균 길이 반환=avg_length
   VPID vpid;			/* Page-volume identifier */
   PAGE_PTR hdr_pgptr = NULL;	/* Page pointer */
   RECDES hdr_recdes;		/* Record descriptor to point to space statistics */
@@ -9136,7 +9138,7 @@ heap_estimate (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, int *nob
   vpid.volid = hfid->vfid.volid;
   vpid.pageid = hfid->hpgid;
 
-  hdr_pgptr = pgbuf_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_READ, PGBUF_UNCONDITIONAL_LATCH);
+  hdr_pgptr = pgbuf_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_READ, PGBUF_UNCONDITIONAL_LATCH); // vpid(hfid)를 fix한 어떤 값을 hdr_pgptr에 할당
   if (hdr_pgptr == NULL)
     {
       /* something went wrong. Unable to fetch header page */
@@ -9147,7 +9149,7 @@ heap_estimate (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, int *nob
   (void) pgbuf_check_page_ptype (thread_p, hdr_pgptr, PAGE_HEAP);
 #endif /* !NDEBUG */
 
-  if (spage_get_record (thread_p, hdr_pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &hdr_recdes, PEEK) != S_SUCCESS)
+  if (spage_get_record (thread_p, hdr_pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &hdr_recdes, PEEK) != S_SUCCESS) // hdr_recdes에 record 받아옴
     {
       pgbuf_unfix_and_init (thread_p, hdr_pgptr);
       return ER_FAILED;
@@ -9158,7 +9160,7 @@ heap_estimate (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, int *nob
   *nobjs = heap_hdr->estimates.num_recs;
   if (*nobjs > 0)
     {
-      *avg_length = (int) ((heap_hdr->estimates.recs_sumlen / (float) *nobjs) + 0.9);
+      *avg_length = (int) ((heap_hdr->estimates.recs_sumlen / (float) *nobjs) + 0.9); // 전체 record의 길이에서 평균을 구함
     }
   else
     {
@@ -9167,7 +9169,7 @@ heap_estimate (THREAD_ENTRY * thread_p, const HFID * hfid, int *npages, int *nob
 
   pgbuf_unfix_and_init (thread_p, hdr_pgptr);
 
-  return *npages;
+  return *npages; // 총 페이지 수 반환
 }
 
 /*
@@ -9205,7 +9207,7 @@ heap_estimate_num_objects (THREAD_ENTRY * thread_p, const HFID * hfid)
  */
 static int
 heap_estimate_avg_length (THREAD_ENTRY * thread_p, const HFID * hfid, int &avg_reclen)
-{
+{ // 전체 record의 평균 길이 반환
   int ignore_npages;
   int ignore_nobjs;
 
@@ -10165,7 +10167,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
 
   if (recdes == NULL || recdes->data == NULL || value->read_attrepr == NULL || value->attr_type == HEAP_SHARED_ATTR
       || value->attr_type == HEAP_CLASS_ATTR)
-    {
+    { // 여긴 지나침
       /*
        * Either the attribute is a shared or class attr, or the attribute
        * does not exist in this disk representation, or we do not have
@@ -10183,7 +10185,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
     {
       attrepr = value->read_attrepr;
       /* Is it a fixed size attribute ? */
-      if (value->read_attrepr->is_fixed != 0)
+      if (value->read_attrepr->is_fixed != 0) // 데이터가 가변 데이터라면
 	{
 	  /*
 	   * A fixed attribute.
@@ -10214,7 +10216,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
 	       * The variable attribute is bound.
 	       * Find its location through the variable offset attribute table.
 	       */
-	      disk_data = ((char *) recdes->data + OR_VAR_OFFSET (recdes->data, value->read_attrepr->location));
+	      disk_data = ((char *) recdes->data + OR_VAR_OFFSET (recdes->data, value->read_attrepr->location)); // OR에서의 offset만큼 더하면 데이터가 나옴
 
 	      disk_bound = true;
 	      switch (TP_DOMAIN_TYPE (attrepr->domain))
@@ -10446,7 +10448,7 @@ heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECD
   for (i = 0; i < attr_info->num_values; i++)
     {
       value = &attr_info->values[i];
-      ret = heap_attrvalue_read (recdes, value, attr_info);
+      ret = heap_attrvalue_read (recdes, value, attr_info); // value->dbvalue에 저장
       if (ret != NO_ERROR)
 	{
 	  goto exit_on_error;
@@ -15143,7 +15145,7 @@ heap_chnguess_initialize (void)
 
   if (heap_Guesschn != NULL)
     {
-      ret = heap_chnguess_finalize ();
+      ret = heap_chnguess_finalize (); // heap_Guesschn 초기화
       if (ret != NO_ERROR)
 	{
 	  goto exit_on_error;
@@ -19193,7 +19195,7 @@ heap_get_bigone_content (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, b
     {
       scan_cache->assign_recdes_to_area (*recdes);
 
-      while ((scan = heap_ovf_get (thread_p, forward_oid, recdes, NULL_CHN, NULL)) == S_DOESNT_FIT)
+      while ((scan = heap_ovf_get (thread_p, forward_oid, recdes, NULL_CHN, NULL)) == S_DOESNT_FIT) // 하나씩 들고 와서 찾는건지 확인
 	{
 	  /*
 	   * The object did not fit into such an area, reallocate a new area
@@ -19804,7 +19806,7 @@ heap_unfix_watchers (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
  */
 static void
 heap_clear_operation_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p)
-{
+{ // 파라미터로 전달된 HEAP_OPERATION_CONTEXT 초기화
   assert (context != NULL);
   assert (hfid_p != NULL);
 
@@ -21050,7 +21052,7 @@ heap_delete_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
       HEAP_PERF_TRACK_LOGGING (thread_p, context);
 
       /* adjust header; we don't care to make header max size since it's already done */
-      heap_delete_adjust_header (&overflow_header, mvcc_id, false);
+      heap_delete_adjust_header (&overflow_header, mvcc_id, false); // MVCC delid 추가
 
       /* write header to overflow */
       rc = heap_set_mvcc_rec_header_on_overflow (context->overflow_page_watcher_p->pgptr, &overflow_header);
@@ -21164,7 +21166,7 @@ heap_delete_relocation (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * contex
     }
 
   /* get forward oid */
-  forward_oid = *((OID *) context->home_recdes.data);
+  forward_oid = *((OID *) context->home_recdes.data); // pointing
 
   /* fix forward page */
   if (heap_fix_forward_page (thread_p, context, &forward_oid) != NO_ERROR)
@@ -22100,21 +22102,21 @@ heap_update_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
       VPID ovf_vpid;
       PAGE_PTR first_pgptr;
 
-      if (heap_get_bigone_content (thread_p, context->scan_cache_p, COPY, &context->ovf_oid, &ovf_recdes) != S_SUCCESS)
+      if (heap_get_bigone_content (thread_p, context->scan_cache_p, COPY, &context->ovf_oid, &ovf_recdes) != S_SUCCESS) // ovf_id에 해당하는 data 가져오기
 	{
 	  error_code = ER_FAILED;
 	  goto exit;
 	}
 
       VPID_GET_FROM_OID (&ovf_vpid, &context->ovf_oid);
-      first_pgptr = pgbuf_fix (thread_p, &ovf_vpid, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
+      first_pgptr = pgbuf_fix (thread_p, &ovf_vpid, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH); // 얻어온 ovf_vpid fix
       if (first_pgptr == NULL)
 	{
 	  error_code = ER_FAILED;
 	  goto exit;
 	}
 
-      if (heap_ovf_find_vfid (thread_p, &context->hfid, &ovf_vfid, false, PGBUF_UNCONDITIONAL_LATCH) == NULL)
+      if (heap_ovf_find_vfid (thread_p, &context->hfid, &ovf_vfid, false, PGBUF_UNCONDITIONAL_LATCH) == NULL) // ovf_id에 해당하는 fileid 가져오기
 	{
 	  error_code = ER_FAILED;
 	  goto exit;
@@ -22137,7 +22139,7 @@ heap_update_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
     }
 
   /* Proceed with the update. the new record is prepared and for mvcc it should have the prev version lsa set */
-  if (heap_is_big_length (context->recdes_p->length))
+  if (heap_is_big_length (context->recdes_p->length)) // 넣을 데이터가 overflow라면
     {
       /* overflow -> overflow update */
       is_old_home_updated = false;
@@ -22176,7 +22178,7 @@ heap_update_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
 	}
     }
   else if (spage_update (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid, context->recdes_p) ==
-	   SP_SUCCESS)
+	   SP_SUCCESS) // 넣을 데이터가 ovf가 아니라면 update 진행하고 SUCCESS가 아니면(new_home으로 update해야 할 때) 넘김
     {
       /* overflow -> rec home update (new record fits in home page) */
       is_old_home_updated = true;
@@ -22193,7 +22195,7 @@ heap_update_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
       /* dirty home page */
       pgbuf_set_dirty (thread_p, context->home_page_watcher_p->pgptr, DONT_FREE);
     }
-  else
+  else // new_home으로 update 진행
     {
       /* overflow -> rec relocation update (home record will point to the new_home record) */
       OID newhome_oid;
@@ -22230,7 +22232,7 @@ heap_update_bigone (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, b
       HEAP_PERF_TRACK_EXECUTE (thread_p, context);
     }
 
-  if (is_old_home_updated)
+  if (is_old_home_updated) // ovf -> ovf가 아니면 기존 ovf 삭제
     {
       /* log home update operation and remove old overflow record */
       heap_log_update_physical (thread_p, context->home_page_watcher_p->pgptr, &context->hfid.vfid,
@@ -22303,10 +22305,10 @@ heap_update_relocation (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * contex
     }
 
   /* get forward oid */
-  forward_oid = *((OID *) context->home_recdes.data);
+  forward_oid = *((OID *) context->home_recdes.data); // NEW_HOME 데이터
 
   /* fix forward page */
-  rc = heap_fix_forward_page (thread_p, context, &forward_oid);
+  rc = heap_fix_forward_page (thread_p, context, &forward_oid); // 기존 데이터 담은 페이지 fix
   if (rc != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -22314,9 +22316,9 @@ heap_update_relocation (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * contex
     }
 
   /* fix header if necessary */
-  fits_in_home =
+  fits_in_home = // 기존의 주소만 담는 REC_RELOCATION에 삽입 가능한지
     spage_is_updatable (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid, context->recdes_p->length);
-  fits_in_forward =
+  fits_in_forward =  // 기존의 주소가 가리키는 REC_NEWHOME에 삽입 가능한지
     spage_is_updatable (thread_p, context->forward_page_watcher_p->pgptr, forward_oid.slotid,
 			context->recdes_p->length);
   if (heap_is_big_length (context->recdes_p->length) || (!fits_in_forward && !fits_in_home))
@@ -22333,7 +22335,7 @@ heap_update_relocation (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * contex
   /* get forward record */
   forward_recdes.area_size = DB_PAGESIZE;
   forward_recdes.data = PTR_ALIGN (forward_recdes_buffer, MAX_ALIGNMENT);
-  if (spage_get_record (thread_p, context->forward_page_watcher_p->pgptr, forward_oid.slotid, &forward_recdes, COPY) !=
+  if (spage_get_record (thread_p, context->forward_page_watcher_p->pgptr, forward_oid.slotid, &forward_recdes, COPY) != // forward_recdes에 area_size랑 data 받아오기
       S_SUCCESS)
     {
       assert (false);
@@ -22696,7 +22698,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
 	}
 
       /* fix header page */
-      error_code = heap_fix_header_page (thread_p, context);
+      error_code = heap_fix_header_page (thread_p, context); // context의 volid/hpgid를 fix
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -22733,14 +22735,14 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
       context->recdes_p->type = REC_HOME;
 
       /* updated record fits in home page */
-      home_page_updated_recdes_p = context->recdes_p;
+      home_page_updated_recdes_p = context->recdes_p; // home type 데이터를 update할 때 home_page_updated_recdes_p를 활용함. context->recdes_p=new_data
 
       perfmon_inc_stat (thread_p, PSTAT_HEAP_HOME_UPDATES);
     }
 
   HEAP_PERF_TRACK_EXECUTE (thread_p, context);
 
-  if ((home_page_updated_recdes_p->type == REC_RELOCATION || home_page_updated_recdes_p->type == REC_BIGONE)
+  if ((home_page_updated_recdes_p->type == REC_RELOCATION || home_page_updated_recdes_p->type == REC_BIGONE) // 통과
       && context->home_page_watcher_p->page_was_unfixed)
     {
       /*
@@ -22761,7 +22763,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
 
   /* log home update */
   heap_log_update_physical (thread_p, context->home_page_watcher_p->pgptr, &context->hfid.vfid, &context->oid,
-			    &context->home_recdes, home_page_updated_recdes_p, undo_rcvindex);
+			    &context->home_recdes, home_page_updated_recdes_p, undo_rcvindex); // log update해줌
 
   /* undo lsa for SUPPLEMENT_UPDATE : REC_HOME to REC_RELOCATION/BIGONE 
    * if redo lsa is NULL , then append redo lsa :update REC_HOME to REC_HOME case */
@@ -22793,7 +22795,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
   if (is_mvcc_op)
     {
       /* the updated record needs the prev version lsa to the undo log record where the old record can be found */
-      error_code = heap_update_set_prev_version (thread_p, &context->oid, context->home_page_watcher_p,
+      error_code = heap_update_set_prev_version (thread_p, &context->oid, context->home_page_watcher_p, // mvcc version을 이전 버전으로 설정
 						 newhome_pg_watcher_p, &prev_version_lsa);
       if (error_code != NO_ERROR)
 	{
@@ -22843,7 +22845,7 @@ heap_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, short slot_id, R
   old_record_type = spage_get_record_type (page_p, slot_id);
 
   /* update home page and check operation result */
-  scancode = spage_update (thread_p, page_p, slot_id, recdes_p);
+  scancode = spage_update (thread_p, page_p, slot_id, recdes_p); // slot_id의 데이터를 new_data로 update
   if (scancode != SP_SUCCESS)
     {
       /*
@@ -22872,7 +22874,7 @@ heap_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, short slot_id, R
     }
 
   /* mark as dirty */
-  pgbuf_set_dirty (thread_p, page_p, DONT_FREE);
+  pgbuf_set_dirty (thread_p, page_p, DONT_FREE); // page dirty 설정
 
   /* all ok */
   return NO_ERROR;
@@ -22932,7 +22934,7 @@ heap_log_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
 void
 heap_create_insert_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID * class_oid_p, RECDES * recdes_p,
 			    HEAP_SCANCACHE * scancache_p)
-{
+{ // insert를 위한 context 만들어줌 1. recdes_p=파라미터로 전달된 recdes_p 2. scan_cache_p=파라미터로 전달된 scancache_p 3. type=insert 4. use_bulk_logging=false
   assert (context != NULL);
   assert (hfid_p != NULL);
   assert (recdes_p != NULL);
@@ -23052,7 +23054,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
 
   /* check scancache */
   if (heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p) !=
-      NO_ERROR)
+      NO_ERROR) // scancache에 hfid가 없을 수가 없음
     {
       return ER_FAILED;
     }
@@ -23113,7 +23115,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   /*
    * Handle multipage object
    */
-  if (heap_insert_handle_multipage_record (thread_p, context) != NO_ERROR)
+  if (heap_insert_handle_multipage_record (thread_p, context) != NO_ERROR) // overflow file인지 확인 overflow file이면 overflow insert 수행
     {
       rc = ER_FAILED;
       goto error;
@@ -23130,14 +23132,14 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
        * Locking
        */
       /* make sure we have IX_LOCK on class see [NOTE-1] */
-      if (lock_object (thread_p, &context->class_oid, oid_Root_class_oid, IX_LOCK, LK_UNCOND_LOCK) != LK_GRANTED)
+      if (lock_object (thread_p, &context->class_oid, oid_Root_class_oid, IX_LOCK, LK_UNCOND_LOCK) != LK_GRANTED) // table에 ix_lock 획득
 	{
 	  return ER_FAILED;
 	}
     }
 
   /* get insert location (includes locking) */
-  if (heap_get_insert_location_with_lock (thread_p, context, home_hint_p) != NO_ERROR)
+  if (heap_get_insert_location_with_lock (thread_p, context, home_hint_p) != NO_ERROR) // slot_id 찾고, slot 위치에 x_lock 획득
     {
       return ER_FAILED;
     }
@@ -23147,7 +23149,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   /*
    * Physical insertion
    */
-  if (heap_insert_physical (thread_p, context) != NO_ERROR)
+  if (heap_insert_physical (thread_p, context) != NO_ERROR) // spage에 insert
     {
       rc = ER_FAILED;
       goto error;
@@ -23161,7 +23163,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   if (!context->use_bulk_logging)
     {
       heap_log_insert_physical (thread_p, context->home_page_watcher_p->pgptr, &context->hfid.vfid, &context->res_oid,
-				context->recdes_p, is_mvcc_op, context->is_redistribute_insert_with_delid);
+				context->recdes_p, is_mvcc_op, context->is_redistribute_insert_with_delid); // physical insert 내용 log 남기기
 
       /* redo lsa for SUPPLEMENT_INSERT log */
       if (context->do_supplemental_log && context->recdes_p->type != REC_BIGONE)
@@ -23173,7 +23175,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   HEAP_PERF_TRACK_LOGGING (thread_p, context);
 
   /* mark insert page as dirty */
-  pgbuf_set_dirty (thread_p, context->home_page_watcher_p->pgptr, DONT_FREE);
+  pgbuf_set_dirty (thread_p, context->home_page_watcher_p->pgptr, DONT_FREE); // dirty 설정
 
   /*
    * Page unfix or caching
@@ -23329,7 +23331,7 @@ heap_delete_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Fetch object's page and check record type
    */
-  if (heap_get_record_location (thread_p, context) != NO_ERROR)
+  if (heap_get_record_location (thread_p, context) != NO_ERROR) // context가 가리키는 데이터가 있는 id 받아오기
     {
       rc = ER_FAILED;
       goto error;
@@ -23527,7 +23529,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Get location
    */
-  rc = heap_get_record_location (thread_p, context);
+  rc = heap_get_record_location (thread_p, context); // page가 fix되어 있지 않으면 디스크에 있는 page를 fix
   if (rc != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -23540,7 +23542,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Fetch record
    */
-  context->record_type = spage_get_record_type (context->home_page_watcher_p->pgptr, context->oid.slotid);
+  context->record_type = spage_get_record_type (context->home_page_watcher_p->pgptr, context->oid.slotid); // old_data record_type 가져오기
   if (context->record_type == REC_UNKNOWN)
     {
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_HEAP_UNKNOWN_OBJECT, 3, context->oid.volid, context->oid.pageid,
@@ -23552,7 +23554,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   context->home_recdes.area_size = DB_PAGESIZE;
   context->home_recdes.data = PTR_ALIGN (context->home_recdes_buffer, MAX_ALIGNMENT);
   if (spage_get_record (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid, &context->home_recdes, COPY)
-      != S_SUCCESS)
+      != S_SUCCESS) // old_data를 context->home_recdes에 저장
     {
       rc = ER_FAILED;
       goto exit;
@@ -23595,7 +23597,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Update record
    */
-  switch (context->record_type)
+  switch (context->record_type) // old_data의 type에 따라 다른 로직 수행
     {
     case REC_RELOCATION:
       rc = heap_update_relocation (thread_p, context, is_mvcc_op);
