@@ -1304,7 +1304,7 @@ bool
 heap_is_big_length (int length)
 {
   return (length > heap_Maxslotted_reclength) ? true : false;
-}
+} // heap_Maxslotted_reclength = heap header와 slot 등 최소 크기를 제외한 페이지 크기
 
 /*
  * xheap_get_maxslotted_reclength () -
@@ -3501,7 +3501,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
  * as a side effect to reflect more accurate space on some of the
  * set of best pages.
  */
-static PAGE_PTR
+static PAGE_PTR // 가보자 가보자 가보자
 heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int needed_space, bool isnew_rec,
 			   int newrec_size, HEAP_SCANCACHE * scan_cache, PGBUF_WATCHER * pg_watcher)
 {
@@ -6005,7 +6005,7 @@ heap_rv_mark_deleted_on_postpone (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
  */
 int
 heap_assign_address (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid, OID * oid, int expected_length)
-{
+{ // class_oid 자리를 예약하기 위한 함수인가?
   HEAP_OPERATION_CONTEXT insert_context;
   RECDES recdes;
   int rc;
@@ -6040,8 +6040,8 @@ heap_assign_address (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid
   recdes.length =
     ((expected_length > SSIZEOF (OID) && !heap_is_big_length (expected_length)) ? expected_length : SSIZEOF (OID));
 
-  recdes.data = NULL;
-  recdes.type = REC_ASSIGN_ADDRESS;
+  recdes.data = NULL; // 데이터는 null로
+  recdes.type = REC_ASSIGN_ADDRESS; // type은 ASSIGN_ADDRESS
 
   /* create context */
   heap_create_insert_context (&insert_context, (HFID *) hfid, class_oid, &recdes, NULL); // record insert를 위한 context 생성
@@ -6823,7 +6823,7 @@ static int
 heap_scancache_start_internal (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, const HFID * hfid,
 			       const OID * class_oid, int cache_last_fix_page, bool is_queryscan,
 			       MVCC_SNAPSHOT * mvcc_snapshot)
-{
+{ // 주어진 scancache의 초기값 설정을 해줌(class 정보를 넣어주거나 class_oid가 비어있다면 null로 두거나 등등..)
   int ret = NO_ERROR;
 
   if (class_oid != NULL)
@@ -6856,7 +6856,7 @@ heap_scancache_start_internal (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_ca
       assert (scan_cache->file_type == FILE_HEAP || scan_cache->file_type == FILE_HEAP_REUSE_SLOTS);
     }
   else
-    {
+    { // class_oid가 null이면
       /*
        * Scanning the instances of any class in the heap
        */
@@ -7173,7 +7173,7 @@ heap_scancache_quick_start_modify (HEAP_SCANCACHE * scan_cache)
  */
 static int
 heap_scancache_quick_start_internal (HEAP_SCANCACHE * scan_cache, const HFID * hfid)
-{
+{ // scancache 그냥 초기값 세팅해주는 것 같은데 page_latch는 S_LOCK로 하는 이유를 모르겠음
   HFID_SET_NULL (&scan_cache->node.hfid);
   if (hfid == NULL)
     {
@@ -7211,7 +7211,7 @@ heap_scancache_quick_start_internal (HEAP_SCANCACHE * scan_cache, const HFID * h
  */
 static int
 heap_scancache_quick_end (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
-{
+{ // scancache의 값들을 다 null로 초기화한다고 보면 됨
   int ret = NO_ERROR;
 
   if (scan_cache->debug_initpattern != HEAP_DEBUG_SCANCACHE_INITPATTERN)
@@ -7226,7 +7226,7 @@ heap_scancache_quick_end (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
       scan_cache->m_index_stats = NULL;
       scan_cache->num_btids = 0;
 
-      if (scan_cache->cache_last_fix_page == true)
+      if (scan_cache->cache_last_fix_page == true) // cache_last_fix_page가 true인 경우
 	{
 	  /* Free fetched page */
 	  if (scan_cache->page_watcher.pgptr != NULL)
@@ -7235,7 +7235,7 @@ heap_scancache_quick_end (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
 	    }
 	}
 
-      if (scan_cache->partition_list)
+      if (scan_cache->partition_list) // partition_list가 존재하는 경우. partition_list가 뭔지 모르겠음(join같은거 아닐까?)
 	{
 	  HEAP_SCANCACHE_NODE_LIST *next_node = NULL;
 	  HEAP_SCANCACHE_NODE_LIST *curr_node = NULL;
@@ -7251,8 +7251,8 @@ heap_scancache_quick_end (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
 	}
     }
 
-  HFID_SET_NULL (&scan_cache->node.hfid);
-  scan_cache->node.hfid.vfid.volid = NULL_VOLID;
+  HFID_SET_NULL (&scan_cache->node.hfid); // hfid null. 다 null로 초기화해주는듯
+  scan_cache->node.hfid.vfid.volid = NULL_VOLID; // volid null
   scan_cache->node.classname = NULL;
   OID_SET_NULL (&scan_cache->node.class_oid);
   scan_cache->page_latch = NULL_LOCK;
@@ -7489,7 +7489,7 @@ heap_get_if_diff_chn (THREAD_ENTRY * thread_p, PAGE_PTR pgptr, INT16 slotid, REC
 SCAN_CODE
 heap_prepare_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, bool is_heap_scan,
 			  NON_EXISTENT_HANDLING non_ex_handling_type)
-{
+{ // 전달된 context의 데이터를 사용할 수 있게 준비 작업해줌(fix..등등)
   SPAGE_SLOT *slot_p = NULL;
   RECDES peek_recdes;
   SCAN_CODE scan = S_SUCCESS;
@@ -7502,7 +7502,7 @@ heap_prepare_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, b
 try_again:
 
   /* First make sure object home_page is fixed. */
-  ret = heap_prepare_object_page (thread_p, context->oid_p, &context->home_page_watcher, context->latch_mode);
+  ret = heap_prepare_object_page (thread_p, context->oid_p, &context->home_page_watcher, context->latch_mode); // context->oid_p에 해당하는 page fix
   if (ret != NO_ERROR)
     {
       if (ret == ER_HEAP_UNKNOWN_OBJECT)
@@ -7524,7 +7524,7 @@ try_again:
     }
 
   /* Get slot. */
-  slot_p = spage_get_slot (context->home_page_watcher.pgptr, context->oid_p->slotid);
+  slot_p = spage_get_slot (context->home_page_watcher.pgptr, context->oid_p->slotid); // slot_p에 pgptr/slotid에 해당하는 주소값 할당
   if (slot_p == NULL)
     {
       /* Slot doesn't exist. */
@@ -7552,11 +7552,11 @@ try_again:
     }
 
   /* Fix required pages. */
-  switch (slot_p->record_type)
+  switch (slot_p->record_type) // (아마 각 데이터 타입에 따라 준비해줘야 하는 작업이 달라서 case로 나눠놓은 것 같음)
     {
-    case REC_RELOCATION:
+    case REC_RELOCATION: // 데이터 타입이 REC_RELOCATION인 경우
       /* Need to get forward_oid and fix forward page */
-      scan = spage_get_record (thread_p, context->home_page_watcher.pgptr, context->oid_p->slotid, &peek_recdes, PEEK);
+      scan = spage_get_record (thread_p, context->home_page_watcher.pgptr, context->oid_p->slotid, &peek_recdes, PEEK); // peek_recdes에 데이터 할당
       if (scan != S_SUCCESS)
 	{
 	  /* Unexpected. */
@@ -7566,10 +7566,10 @@ try_again:
       /* Output forward_oid. */
       COPY_OID (&context->forward_oid, (OID *) peek_recdes.data);
 
-      /* Try to latch forward_page. */
+      /* Try to latch forward_page. */heap_get_last_version
       PGBUF_WATCHER_COPY_GROUP (&context->fwd_page_watcher, &context->home_page_watcher);
       ret = heap_prepare_object_page (thread_p, &context->forward_oid, &context->fwd_page_watcher, context->latch_mode);
-      if (ret == NO_ERROR)
+      if (ret == NO_ERROR) // 이미 위에서 home은 fix했으니, fwd도 fix
 	{
 	  /* Pages successfully fixed. */
 	  if (context->home_page_watcher.page_was_unfixed)
@@ -7723,7 +7723,7 @@ error:
  */
 SCAN_CODE
 heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_REC_HEADER * mvcc_header)
-{
+{ // 각 데이터 타입에 맞게 mvcc_header를 찾아서 반환해줌
   RECDES peek_recdes;
   SCAN_CODE scan_code;
   PAGE_PTR home_page, forward_page;
@@ -7732,7 +7732,7 @@ heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_
   assert (context != NULL && context->oid_p != NULL);
 
   oid = context->oid_p;
-  home_page = context->home_page_watcher.pgptr;
+  home_page = context->home_page_watcher.pgptr; // context에는 home/fwd watcher가 모두 있음
   forward_page = context->fwd_page_watcher.pgptr;
 
   assert (home_page != NULL);
@@ -7780,7 +7780,7 @@ heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_
 	  assert (false);
 	  return S_ERROR;
 	}
-      if (or_mvcc_get_header (&peek_recdes, mvcc_header) != NO_ERROR)
+      if (or_mvcc_get_header (&peek_recdes, mvcc_header) != NO_ERROR) // context->fwd 데이터의 mvcc_header 가져옴
 	{
 	  /* Unexpected. */
 	  assert (false);
@@ -7828,7 +7828,7 @@ heap_get_record_data_when_all_ready (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT *
     case REC_RELOCATION:
       /* Don't peek REC_RELOCATION. */
       if (scan_cache_p != NULL && (context->ispeeking != 0 || context->recdes_p->data == NULL)
-	  && heap_scan_cache_allocate_recdes_data (thread_p, scan_cache_p, context->recdes_p,
+	  && heap_scan_cache_allocate_recdes_data (thread_p, scan_cache_p, context->recdes_p, // context->recdes_p를 scan_cache_p에서 찾아줌
 						   DB_PAGESIZE * 2) != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -7836,7 +7836,7 @@ heap_get_record_data_when_all_ready (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT *
 	}
 
       return spage_get_record (thread_p, context->fwd_page_watcher.pgptr, context->forward_oid.slotid,
-			       context->recdes_p, COPY);
+			       context->recdes_p, COPY); // context->recdes_p에 데이터 할당
     case REC_BIGONE:
       return heap_get_bigone_content (thread_p, scan_cache_p, context->ispeeking, &context->forward_oid,
 				      context->recdes_p);
@@ -8830,8 +8830,8 @@ heap_scanrange_last (THREAD_ENTRY * thread_p, OID * last_oid, RECDES * recdes, H
  * passed, the function finds the class oid.
  */
 bool
-heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // csql 실행할 때도 호출됨
-{
+heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // csql 실행할 때 (class_oid=root class)
+{ // 주어진 oid에 실제 데이터가 존재하는지, class_oid가 root class인지 판별
   VPID vpid;
   OID tmp_oid;
   PGBUF_WATCHER pg_watcher;
@@ -8843,7 +8843,7 @@ heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // c
   PGBUF_INIT_WATCHER (&pg_watcher, PGBUF_ORDERED_HEAP_NORMAL, PGBUF_ORDERED_NULL_HFID);
 
   old_check_interrupt = logtb_set_check_interrupt (thread_p, false); // interrupt 발생 여부
-  old_wait_msec = xlogtb_reset_wait_msecs (thread_p, LK_INFINITE_WAIT); // 얼나 대기할지 나타내는 것 같음
+  old_wait_msec = xlogtb_reset_wait_msecs (thread_p, LK_INFINITE_WAIT); // 얼마나 대기할지 나타내는 것 같음
 
   if (HEAP_ISVALID_OID (thread_p, oid) != DISK_VALID)
     {
@@ -8857,7 +8857,7 @@ heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // c
    * for it
    */
   if (class_oid != NULL && !OID_EQ (class_oid, oid_Root_class_oid)
-      && HEAP_ISVALID_OID (thread_p, class_oid) != DISK_VALID)
+      && HEAP_ISVALID_OID (thread_p, class_oid) != DISK_VALID) // class_oid가 root_class가 아니고 DISK_VALID와 다른 경우
     {
       doesexist = false;
       goto exit_on_end;
@@ -8875,7 +8875,7 @@ heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // c
       vpid.pageid = oid->pageid;
 
       /* Fetch the page where the record is stored */
-
+                        // vpid 버퍼에 올리고 S_LOCK 획득
       pg_watcher.pgptr = heap_scan_pb_lock_and_fetch (thread_p, &vpid, OLD_PAGE, S_LOCK, NULL, &pg_watcher);
       if (pg_watcher.pgptr == NULL)
 	{
@@ -8890,8 +8890,8 @@ heap_does_exist (THREAD_ENTRY * thread_p, OID * class_oid, const OID * oid) // c
 	  goto exit_on_end;
 	}
 
-      doesexist = spage_is_slot_exist (pg_watcher.pgptr, oid->slotid);
-      rectype = spage_get_record_type (pg_watcher.pgptr, oid->slotid);
+      doesexist = spage_is_slot_exist (pg_watcher.pgptr, oid->slotid); // 전달된 oid->slotid가 가리키는 곳에 실제 데이터가 존재하는지 확인
+      rectype = spage_get_record_type (pg_watcher.pgptr, oid->slotid); // 전달된 oid->slotid가 가리키는 곳의 데이터 타입 얻어오기
 
       /*
        * Check the class
@@ -9479,9 +9479,9 @@ heap_get_class_name_alloc_if_diff (THREAD_ENTRY * thread_p, const OID * class_oi
   HEAP_SCANCACHE scan_cache;
   int error_code = NO_ERROR;
 
-  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache);
+  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // root_hfid 찾아서 scancache에 설정하고 나머지 값들은 초기화
 
-  if (heap_get_class_record (thread_p, class_oid, &recdes, &scan_cache, PEEK) == S_SUCCESS)
+  if (heap_get_class_record (thread_p, class_oid, &recdes, &scan_cache, PEEK) == S_SUCCESS) // 여기서 얻어진 recdes로 아래에서 classname 찾음
     {
       classname = or_class_name (&recdes);
       if (guess_classname == NULL || strcmp (guess_classname, classname) != 0)
@@ -9984,7 +9984,7 @@ heap_attrinfo_recache (THREAD_ENTRY * thread_p, REPR_ID reprid, HEAP_CACHE_ATTRI
       return NO_ERROR;
     }
 
-  if (reprid == attr_info->last_classrepr->id)
+  if (reprid == attr_info->last_classrepr->id) // attr_info->last_classrepr가 뭔지 모르겠음
     {
       /*
        * Take a short cut
@@ -9993,12 +9993,12 @@ heap_attrinfo_recache (THREAD_ENTRY * thread_p, REPR_ID reprid, HEAP_CACHE_ATTRI
 	{
 	  for (i = 0; i < attr_info->num_values; i++)
 	    {
-	      value = &attr_info->values[i];
-	      value->read_attrepr = value->last_attrepr;
+	      value = &attr_info->values[i]; // attr_info->values에 있는 정보 가져옴
+	      value->read_attrepr = value->last_attrepr; // read_attrepr/last_attrepr 뭔지 이해 안 됨
 	    }
 	}
       attr_info->read_classrepr = attr_info->last_classrepr;
-      attr_info->read_cacheindex = -1;	/* Don't need to free this one */
+      attr_info->read_cacheindex = -1;	/* Don't need to free this one */ // classrepr에서 값을 얻어온게 아니면 1. 뭔지 모르겠음
       return NO_ERROR;
     }
 
@@ -10185,7 +10185,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
     {
       attrepr = value->read_attrepr;
       /* Is it a fixed size attribute ? */
-      if (value->read_attrepr->is_fixed != 0) // 데이터가 가변 데이터라면
+      if (value->read_attrepr->is_fixed != 0) // 데이터가 고정 길이 데이터라면
 	{
 	  /*
 	   * A fixed attribute.
@@ -10430,10 +10430,10 @@ heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECD
     {
       reprid = or_rep_id (recdes);
 
-      if (attr_info->read_classrepr == NULL || attr_info->read_classrepr->id != reprid)
+      if (attr_info->read_classrepr == NULL || attr_info->read_classrepr->id != reprid) // 전달된 attr_info->read_classrepr가 null이라면
 	{
 	  /* Get the needed representation */
-	  ret = heap_attrinfo_recache (thread_p, reprid, attr_info);
+	  ret = heap_attrinfo_recache (thread_p, reprid, attr_info); // attr_info->read_classrepr의 값을 얻어옴. 뭘 한건지는 모르겠음
 	  if (ret != NO_ERROR)
 	    {
 	      goto exit_on_error;
@@ -15626,12 +15626,12 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
   bool can_continue;
   HEAP_CHNGUESS_ENTRY *entry;
 
-  if (heap_Guesschn == NULL)
+  if (heap_Guesschn == NULL) // heap_Guesschn은 전역변수
     {
       return NULL_CHN;
     }
 
-  if (csect_enter (thread_p, CSECT_HEAP_CHNGUESS, INF_WAIT) != NO_ERROR)
+  if (csect_enter (thread_p, CSECT_HEAP_CHNGUESS, INF_WAIT) != NO_ERROR) // 뭔지 모르겠음
     {
       return NULL_CHN;
     }
@@ -15648,7 +15648,7 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
   /*
    * Is the entry already in the chnguess hash table ?
    */
-  entry = (HEAP_CHNGUESS_ENTRY *) mht_get (heap_Guesschn->ht, oid);
+  entry = (HEAP_CHNGUESS_ENTRY *) mht_get (heap_Guesschn->ht, oid); // oid에 해당하는 값을 해시 테이블에서 꺼내옴. 즉, entry는 현재 oid의 chn entry임
   if (entry != NULL)
     {
       /*
@@ -15660,7 +15660,7 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
 	  entry->chn = chn;
 	}
     }
-  else
+  else // 현재 oid에 대한 값이 해시 테이블에 없으면 entry가 null일 수 있음
     {
       /*
        * Replace one of the entries that has not been used for a while.
@@ -15670,33 +15670,33 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
       while (entry == NULL && can_continue == true)
 	{
 	  can_continue = false;
-	  for (i = 0; i < heap_Guesschn->num_entries; i++)
+	  for (i = 0; i < heap_Guesschn->num_entries; i++) // heap_Guesschn->num_entries값인 1024만큼 반복
 	    {
 	      /*
 	       * Increase the clock to next entry
 	       */
-	      heap_Guesschn->clock_hand++;
-	      if (heap_Guesschn->clock_hand >= heap_Guesschn->num_entries)
+	      heap_Guesschn->clock_hand++; // clock_hand는 entries를 순회할 때 쓰는 인덱스같음
+	      if (heap_Guesschn->clock_hand >= heap_Guesschn->num_entries) // clock_hand가 num_entries(1024)보다 크면 0 할당
 		{
 		  heap_Guesschn->clock_hand = 0;
 		}
 
-	      entry = &heap_Guesschn->entries[heap_Guesschn->clock_hand];
+	      entry = &heap_Guesschn->entries[heap_Guesschn->clock_hand]; // clock_hand 번째의 entrie 할당
 	      if (entry->recently_accessed == true)
 		{
 		  /*
 		   * Set recently freed to false, so it can be replaced in next
 		   * if the entry is not referenced
 		   */
-		  entry->recently_accessed = false;
-		  entry = NULL;
-		  can_continue = true;
+		  entry->recently_accessed = false; // 최근 참조가 true인 것을 false로 바꾸면 최근에 참조된 내용을 제거하게 될 수 있는데,
+		  entry = NULL;                     // 최근 참조가 됐다는건 자주 쓰인다는거 아닌가?
+		  can_continue = true;              // 가설: 최근에 참조해서 entry를 썼으니 다른 스레드가 쓸 수 있게 false로 바꿔주는 것 같음
 		}
-	      else
+	      else // 최근 참조된 적이 없으면 현재 사용하려는 데이터(oid, chn) 삽입
 		{
 		  entry->oid = *oid;
 		  entry->chn = chn;
-		  HEAP_NBYTES_CLEARED (entry->bits, heap_Guesschn->nbytes);
+		  HEAP_NBYTES_CLEARED (entry->bits, heap_Guesschn->nbytes); // 뭔지는 모르겠지만 뭔가 클리어 해줌
 		  break;
 		}
 	    }
@@ -15708,15 +15708,15 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
    */
   if (entry != NULL)
     {
-      HEAP_BIT_SET (entry->bits, tran_index);
-      entry->recently_accessed = true;
+      HEAP_BIT_SET (entry->bits, tran_index); // entry의 bit를 세팅해줌
+      entry->recently_accessed = true; // 최근 참조했음을 표시
     }
   else
     {
       chn = NULL_CHN;
     }
 
-  csect_exit (thread_p, CSECT_HEAP_CHNGUESS);
+  csect_exit (thread_p, CSECT_HEAP_CHNGUESS); // 뭔지 모르겠음
 
   return chn;
 }
@@ -19226,7 +19226,7 @@ heap_get_bigone_content (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, b
  */
 int
 heap_get_class_oid_from_page (THREAD_ENTRY * thread_p, PAGE_PTR page_p, OID * class_oid)
-{
+{ // 주어진 page_p에 해당하는 oid를 class_oid에 할당
   RECDES chain_recdes;
   HEAP_CHAIN *chain;
 
@@ -19660,9 +19660,9 @@ heap_scancache_quick_start_root_hfid (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * 
 {
   HFID root_hfid;
 
-  (void) boot_find_root_heap (&root_hfid);
-  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scancache에 적용
-  scan_cache->page_latch = S_LOCK;
+  (void) boot_find_root_heap (&root_hfid); // root_hfid 찾아주는듯
+  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scan_cache->node.hfid에 적용
+  scan_cache->page_latch = S_LOCK; // heap_scancache_quick_start_internal()에서도 page_latch를 S_LOCK로 해줌
 
   return NO_ERROR;
 }
@@ -19806,7 +19806,7 @@ heap_unfix_watchers (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
  */
 static void
 heap_clear_operation_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p)
-{ // 파라미터로 전달된 HEAP_OPERATION_CONTEXT 초기화
+{ // 파라미터로 전달된 HEAP_OPERATION_CONTEXT 초기값을 설정
   assert (context != NULL);
   assert (hfid_p != NULL);
 
@@ -19820,7 +19820,7 @@ heap_clear_operation_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p)
   PGBUF_INIT_WATCHER (&context->header_page_watcher, PGBUF_ORDERED_HEAP_HDR, hfid_p);
 
   /* by default link physical watchers to usage watchers on same context */
-  heap_link_watchers (context, context);
+  heap_link_watchers (context, context); // 이 함수는 여기서밖에 호출을 안 함. 동일한 context 전달. 각 watcher의 포인터와 값을 연결해줌
 
   /* nullify everything else */
   context->type = HEAP_OPERATION_NONE;
@@ -22934,13 +22934,13 @@ heap_log_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
 void
 heap_create_insert_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID * class_oid_p, RECDES * recdes_p,
 			    HEAP_SCANCACHE * scancache_p)
-{ // insert를 위한 context 만들어줌 1. recdes_p=파라미터로 전달된 recdes_p 2. scan_cache_p=파라미터로 전달된 scancache_p 3. type=insert 4. use_bulk_logging=false
+{ // insert를 위한 context 만들어줌 || 1. recdes_p=파라미터로 전달된 recdes_p 2. scan_cache_p=파라미터로 전달된 scancache_p 3. type=insert 4. use_bulk_logging=false
   assert (context != NULL);
   assert (hfid_p != NULL);
   assert (recdes_p != NULL);
 
   heap_clear_operation_context (context, hfid_p);
-  if (class_oid_p != NULL)
+  if (class_oid_p != NULL) // class_oid는 클라이언트에서부터 전달됨
     {
       COPY_OID (&context->class_oid, class_oid_p);
     }
@@ -23054,7 +23054,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
 
   /* check scancache */
   if (heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p) !=
-      NO_ERROR) // scancache에 hfid가 없을 수가 없음
+      NO_ERROR) // scancache가 null이 아니라면 pass. scancache에 hfid가 없을 수가 없음
     {
       return ER_FAILED;
     }
@@ -24186,7 +24186,7 @@ heap_cache_class_info (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hf
  *	retrieved from the class record.
  */
 static int
-heap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfid_out, FILE_TYPE * ftype_out,
+xheap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfid_out, FILE_TYPE * ftype_out,
 		     char **classname_out)
 {
   int error_code = NO_ERROR;
@@ -25165,13 +25165,13 @@ heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * c
   if (context->scan_cache && context->ispeeking == COPY && context->recdes_p != NULL)
     {
       /* Allocate an area to hold the object. Assume that the object will fit in two pages for not better estimates. */
-      if (heap_scan_cache_allocate_area (thread_p, context->scan_cache, DB_PAGESIZE * 2) != NO_ERROR)
+      if (heap_scan_cache_allocate_area (thread_p, context->scan_cache, DB_PAGESIZE * 2) != NO_ERROR) // context의 scan_cache allocate
 	{
 	  return S_ERROR;
 	}
     }
 
-  scan = heap_prepare_get_context (thread_p, context, is_heap_scan, LOG_WARNING_IF_DELETED);
+  scan = heap_prepare_get_context (thread_p, context, is_heap_scan, LOG_WARNING_IF_DELETED); // oid fix 등등 context에 필요한 작업 진행
   if (scan != S_SUCCESS)
     {
       goto exit;
@@ -25219,7 +25219,7 @@ heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * c
       /* else...fall through to heap get */
     }
 
-  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn))
+  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn)) // 뭔지 모르겠지만 create table 시 여기에 해당돼서 바로 exit로 가는 경우가 있음
     {
       /* Object version didn't change and CHN is up-to-date. Don't get record data and return
        * S_SUCCESS_CHN_UPTODATE instead. */
@@ -25371,12 +25371,12 @@ heap_get_last_version (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
     {
       /* Allocate an area to hold the object. Assume that the object will fit in two pages for not better estimates. */
       if (heap_scan_cache_allocate_area (thread_p, context->scan_cache, DB_PAGESIZE * 2) != NO_ERROR)
-	{
+	{ // 주어진 context의 scancache 객체에 메모리 할당 정책 적용. 이미 할당됐다면 패스
 	  return S_ERROR;
 	}
     }
 
-  scan = heap_prepare_get_context (thread_p, context, false, LOG_WARNING_IF_DELETED);
+  scan = heap_prepare_get_context (thread_p, context, false, LOG_WARNING_IF_DELETED); // context에 해당하는 내용 사용할 수 있게 prepare(fix.. 등등)
   if (scan != S_SUCCESS)
     {
       goto exit;
@@ -25386,7 +25386,7 @@ heap_get_last_version (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
   assert (context->record_type == REC_HOME
 	  || (!OID_ISNULL (&context->forward_oid) && context->fwd_page_watcher.pgptr != NULL));
 
-  scan = heap_get_mvcc_header (thread_p, context, &mvcc_header);
+  scan = heap_get_mvcc_header (thread_p, context, &mvcc_header); // 데이터 타입에 맞게 mvcc header 획득
   if (scan != S_SUCCESS)
     {
       goto exit;
@@ -25402,7 +25402,7 @@ heap_get_last_version (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
 
   if (context->recdes_p != NULL)
     {
-      scan = heap_get_record_data_when_all_ready (thread_p, context);
+      scan = heap_get_record_data_when_all_ready (thread_p, context); // context->recdes에 data 할당
     }
 
   /* Fall through to exit. */
@@ -25424,7 +25424,7 @@ exit:
 int
 heap_prepare_object_page (THREAD_ENTRY * thread_p, const OID * oid, PGBUF_WATCHER * page_watcher_p,
 			  PGBUF_LATCH_MODE latch_mode)
-{
+{ // 주어진 oid에 해당하는 page를 fix하는 작업을 함
   VPID object_vpid;
   int ret = NO_ERROR;
 
@@ -25441,7 +25441,7 @@ heap_prepare_object_page (THREAD_ENTRY * thread_p, const OID * oid, PGBUF_WATCHE
   if (page_watcher_p->pgptr == NULL)
     {
       /* fix required page */
-      ret = pgbuf_ordered_fix (thread_p, &object_vpid, OLD_PAGE, latch_mode, page_watcher_p);
+      ret = pgbuf_ordered_fix (thread_p, &object_vpid, OLD_PAGE, latch_mode, page_watcher_p); // oid fix
       if (ret != NO_ERROR)
 	{
 	  if (ret == ER_PB_BAD_PAGEID)
@@ -25471,7 +25471,7 @@ heap_prepare_object_page (THREAD_ENTRY * thread_p, const OID * oid, PGBUF_WATCHE
  */
 void
 heap_clean_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
-{
+{ // 걍 주어진 context의 watcher들 unfix해주는듯
   assert (context != NULL);
 
   if (context->scan_cache != NULL && context->scan_cache->cache_last_fix_page
@@ -25485,13 +25485,13 @@ heap_clean_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
   if (context->home_page_watcher.pgptr)
     {
       /* Unfix home page. */
-      pgbuf_ordered_unfix (thread_p, &context->home_page_watcher);
+      pgbuf_ordered_unfix (thread_p, &context->home_page_watcher); // context->home_watcher unfix
     }
 
   if (context->fwd_page_watcher.pgptr != NULL)
     {
       /* Unfix forward page. */
-      pgbuf_ordered_unfix (thread_p, &context->fwd_page_watcher);
+      pgbuf_ordered_unfix (thread_p, &context->fwd_page_watcher); // context->fwd_watcher unfix
     }
 
   assert (context->home_page_watcher.pgptr == NULL && context->fwd_page_watcher.pgptr == NULL);
@@ -25512,10 +25512,10 @@ heap_clean_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
 void
 heap_init_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, const OID * oid, OID * class_oid,
 		       RECDES * recdes, HEAP_SCANCACHE * scan_cache, int ispeeking, int old_chn)
-{
-  context->oid_p = oid;
-  context->class_oid_p = class_oid;
-  OID_SET_NULL (&context->forward_oid);
+{ // context를 전달된 인자값으로 초기화
+  context->oid_p = oid; // 전달된 oid 값을 context에 할당
+  context->class_oid_p = class_oid; // 전달된 class_oid 값을 context에 할당
+  OID_SET_NULL (&context->forward_oid); // context->forward_oid 초기화. context->forward_oid는 relocation이나 bigone
   context->recdes_p = recdes;
 
   if (scan_cache != NULL && !HFID_IS_NULL (&scan_cache->node.hfid))
@@ -25535,7 +25535,7 @@ heap_init_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, cons
       pgbuf_replace_watcher (thread_p, &scan_cache->page_watcher, &context->home_page_watcher);
     }
 
-  context->scan_cache = scan_cache;
+  context->scan_cache = scan_cache; // context에 전달된 scan_cache 할당
   context->ispeeking = ispeeking;
   context->old_chn = old_chn;
   if (scan_cache != NULL && scan_cache->page_latch == X_LOCK)
@@ -25558,7 +25558,7 @@ heap_init_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, cons
  */
 int
 heap_scan_cache_allocate_area (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache_p, int size)
-{
+{ // heap scancache를 위한 메모리 정책(할당/해제 함수)을 할당해줌. 이미 할당된 상태라면 통과
   assert (scan_cache_p != NULL && size > 0);
   scan_cache_p->reserve_area ((size_t) size);
   return NO_ERROR;
@@ -25576,7 +25576,7 @@ heap_scan_cache_allocate_area (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_ca
 static int
 heap_scan_cache_allocate_recdes_data (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache_p, RECDES * recdes_p,
 				      int size)
-{
+{ // 레코드에 필요한 메모리를 scancache에서 할당받고, recdes_p에 해당 주소를 할당해줌
   assert (scan_cache_p != NULL && recdes_p != NULL && size >= 0);
   scan_cache_p->assign_recdes_to_area (*recdes_p, (size_t) size);
   return NO_ERROR;
@@ -25595,20 +25595,20 @@ heap_scan_cache_allocate_recdes_data (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * 
 SCAN_CODE
 heap_get_class_record (THREAD_ENTRY * thread_p, const OID * class_oid, RECDES * recdes_p, HEAP_SCANCACHE * scan_cache,
 		       int ispeeking)
-{
+{ // scan_cache를 참고하여 context를 생성하고, mvcc로부터 마지막 버전을 얻어서 주어진 recdes_p에 record 할당
   HEAP_GET_CONTEXT context;
-  OID root_oid = *oid_Root_class_oid;
+  OID root_oid = *oid_Root_class_oid; // 전역 oid_root_class 소환
   SCAN_CODE scan;
 
 #if !defined(NDEBUG)
   /* for debugging set root_oid NULL and check afterwards if it really is root oid */
   OID_SET_NULL (&root_oid);
 #endif /* !NDEBUG */
-  heap_init_get_context (thread_p, &context, class_oid, &root_oid, recdes_p, scan_cache, ispeeking, NULL_CHN);
+  heap_init_get_context (thread_p, &context, class_oid, &root_oid, recdes_p, scan_cache, ispeeking, NULL_CHN); // context 초기화
 
-  scan = heap_get_last_version (thread_p, &context);
+  scan = heap_get_last_version (thread_p, &context); // mvcc header 가져옴
 
-  heap_clean_get_context (thread_p, &context);
+  heap_clean_get_context (thread_p, &context); // context의 page_watcher unfix
 
 #if !defined(NDEBUG)
   assert (OID_ISNULL (&root_oid) || OID_IS_ROOTOID (&root_oid));

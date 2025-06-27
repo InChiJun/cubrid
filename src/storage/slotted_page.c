@@ -3844,7 +3844,7 @@ spage_previous_record (PAGE_PTR page_p, PGSLOTID * out_slot_id_p, RECDES * recor
 SCAN_CODE
 spage_get_record (THREAD_ENTRY * thread_p, PAGE_PTR page_p, PGSLOTID slot_id, RECDES * record_descriptor_p,
 		  int is_peeking)
-{
+{ // 전달된 page_p와 slot_id로 slot_p 찾아서 record_descriptor_p에 데이터 할당
   SPAGE_HEADER *page_header_p;
   SPAGE_SLOT *sptr;
 
