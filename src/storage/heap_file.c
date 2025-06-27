@@ -202,7 +202,7 @@ struct heap_hdr_stats
 				 * needed */
     int num_recs;		/* Estimation of number of objects in heap */
     float recs_sumlen;		/* Estimation total length of records */
-    int num_other_high_best;	/* Total of other believed known best pages, which are not included in the best array
+    int num_other_high_best;	/* Total of other believed known best pages, which are not included in the best array // page의 30% 크기
 				 * and we believe they have at least HEAP_DROP_FREE_SPACE */
     int num_high_best;		/* Number of pages in the best array that we believe have at least
 				 * HEAP_DROP_FREE_SPACE. When this number goes to zero and there is at least other
@@ -1004,17 +1004,17 @@ heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpi
 
   PERF_UTIME_TRACKER_START (thread_p, &time_best_space);
 
-  rc = pthread_mutex_lock (&heap_Bestspace->bestspace_mutex);
+  rc = pthread_mutex_lock (&heap_Bestspace->bestspace_mutex); // 전역 heap_Bestspace mutex lock
 
-  ent = (HEAP_STATS_ENTRY *) mht_get (heap_Bestspace->vpid_ht, vpid);
+  ent = (HEAP_STATS_ENTRY *) mht_get (heap_Bestspace->vpid_ht, vpid); // 전달된 인자의 vpid를 hash 테이블에서 검색
 
-  if (ent)
+  if (ent) // hash 테이블에서 entry를 찾았다면
     {
       ent->best.freespace = freespace;
       goto end;
     }
 
-  if (heap_Bestspace->num_stats_entries >= prm_get_integer_value (PRM_ID_HF_MAX_BESTSPACE_ENTRIES))
+  if (heap_Bestspace->num_stats_entries >= prm_get_integer_value (PRM_ID_HF_MAX_BESTSPACE_ENTRIES)) // 전역 변수에 캐싱된 entry의 개수가 최대 개수 이상이라면
     {
       er_set (ER_NOTIFICATION_SEVERITY, ARG_FILE_LINE, ER_HF_MAX_BESTSPACE_ENTRIES, 1,
 	      prm_get_integer_value (PRM_ID_HF_MAX_BESTSPACE_ENTRIES));
@@ -1025,7 +1025,7 @@ heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpi
       goto end;
     }
 
-  if (heap_Bestspace->free_list_count > 0)
+  if (heap_Bestspace->free_list_count > 0) // 전역 heap_Bestspace의 빈 entry 개수가 0보다 크다면
     {
       assert_release (heap_Bestspace->free_list != NULL);
 
@@ -1039,9 +1039,9 @@ heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpi
 
       heap_Bestspace->free_list_count--;
     }
-  else
+  else // 전역 heap_Bestspace의 빈 entry가 없다면
     {
-      ent = (HEAP_STATS_ENTRY *) malloc (sizeof (HEAP_STATS_ENTRY));
+      ent = (HEAP_STATS_ENTRY *) malloc (sizeof (HEAP_STATS_ENTRY)); // entry 새로 할당
       if (ent == NULL)
 	{
 	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1, sizeof (HEAP_STATS_ENTRY));
@@ -1050,7 +1050,7 @@ heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpi
 	}
     }
 
-  HFID_COPY (&ent->hfid, hfid);
+  HFID_COPY (&ent->hfid, hfid); // 사용할 entry에 값 복사
   ent->best.vpid = *vpid;
   ent->best.freespace = freespace;
   ent->next = NULL;
@@ -1072,13 +1072,13 @@ heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpi
       goto end;
     }
 
-  heap_Bestspace->num_stats_entries++;
+  heap_Bestspace->num_stats_entries++; // 전역 heap_Bestspace에 entry 개수 추가
 
 end:
 
   assert (mht_count (heap_Bestspace->vpid_ht) == mht_count (heap_Bestspace->hfid_ht));
 
-  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex);
+  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex); // mutex 해제
 
   PERF_UTIME_TRACKER_TIME (thread_p, &time_best_space, PSTAT_HF_BEST_SPACE_ADD);
 
@@ -3265,7 +3265,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
   int old_wait_msecs;
   int notfound_cnt;
   HEAP_STATS_ENTRY *ent;
-  HEAP_BESTSPACE best;
+  HEAP_BESTSPACE best; // 인자로 전달된 bestspace[]에 삽입할 객체 생성
   int rc;
   int idx_worstspace;
   int i, best_array_index = -1;
@@ -3288,23 +3288,23 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
   old_wait_msecs = xlogtb_reset_wait_msecs (thread_p, LK_FORCE_ZERO_WAIT);
 
   found = HEAP_FINDSPACE_NOTFOUND;
-  notfound_cnt = 0;
-  best_array_index = 0;
+  notfound_cnt = 0; // 시도했으나 찾지 못한 횟수
+  best_array_index = 0; // best page가 있는 idx?
   hash_is_available = prm_get_integer_value (PRM_ID_HF_MAX_BESTSPACE_ENTRIES) > 0;
 
-  while (found == HEAP_FINDSPACE_NOTFOUND)
+  while (found == HEAP_FINDSPACE_NOTFOUND) // 찾지 못했다면 계속 반복
     {
       best.freespace = -1;	/* init */
-      best_hint_is_used = false;
+      best_hint_is_used = false; // 뭐여
 
       if (hash_is_available)
 	{
 	  PERF_UTIME_TRACKER_START (thread_p, &time_best_space);
-	  rc = pthread_mutex_lock (&heap_Bestspace->bestspace_mutex);
+	  rc = pthread_mutex_lock (&heap_Bestspace->bestspace_mutex); // heap_Bestspace는 best space를 찾기 위해 캐싱하는 전역변수
 
 	  while (notfound_cnt < BEST_PAGE_SEARCH_MAX_COUNT
 		 && (ent = (HEAP_STATS_ENTRY *) mht_get2 (heap_Bestspace->hfid_ht, hfid, NULL)) != NULL)
-	    {
+	    { // hash 테이블에서 heap state 관련 뭔가를 찾으면 이 while문 반복. 못 찾으면 while문 조건 해당 X
 	      if (ent->best.freespace >= needed_space)
 		{
 		  best = ent->best;
@@ -3323,29 +3323,29 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	      notfound_cnt++;
 	    }
 
-	  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex);
+	  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex); // mutex 해제
 	  PERF_UTIME_TRACKER_TIME (thread_p, &time_best_space, PSTAT_HF_BEST_SPACE_FIND);
 	}
 
-      if (best.freespace == -1)
+      if (best.freespace == -1) // 위 while문에서 찾지 못했다면(hash 테이블에서 찾지 못했다면)
 	{
 	  /* Maybe PRM_ID_HF_MAX_BESTSPACE_ENTRIES <= 0 or There is no best space in heap_Bestspace hashtable. We will
 	   * use bestspace hint in heap_header. */
-	  while (best_array_index < HEAP_NUM_BEST_SPACESTATS)
-	    {
-	      if (bestspace[best_array_index].freespace >= needed_space)
+	  while (best_array_index < HEAP_NUM_BEST_SPACESTATS) // HEAP_NUM_BEST_SPACESTATS만큼 찾기
+	    { // 인자로 전달된 bestspace[10] 배열에서 필요한 공간만큼 확보된 인덱스를 찾으면 바로 찾기 완료
+	      if (bestspace[best_array_index].freespace >= needed_space) // heap_hdr.bestspace[index]가 nees_space보다 큰 공간이 freespace라면
 		{
-		  best.vpid = bestspace[best_array_index].vpid;
-		  best.freespace = bestspace[best_array_index].freespace;
+		  best.vpid = bestspace[best_array_index].vpid; // best 객체에 찾은 인덱스의 vpid 할당
+		  best.freespace = bestspace[best_array_index].freespace; // 마찬가지로 찾은 인덱스의 freespace 할당
 		  assert (best.freespace > 0 && best.freespace <= PGLENGTH_MAX);
-		  best_hint_is_used = true;
+		  best_hint_is_used = true; // 인자로 전달된 bestspace를 사용했는지를 나타내는 것 같음
 		  break;
 		}
 	      best_array_index++;
 	    }
 	}
 
-      if (best.freespace == -1)
+      if (best.freespace == -1) // 인자로 전달된 bestspace에서 넣을 수 있는 공간을 못 찾았다면 그냥 종료
 	{
 	  break;		/* not found, exit loop */
 	}
@@ -3368,7 +3368,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	  er_clear ();
 	}
 
-      pg_watcher->pgptr = heap_scan_pb_lock_and_fetch (thread_p, &best.vpid, OLD_PAGE, X_LOCK, scan_cache, pg_watcher);
+      pg_watcher->pgptr = heap_scan_pb_lock_and_fetch (thread_p, &best.vpid, OLD_PAGE, X_LOCK, scan_cache, pg_watcher); // 찾은 best.vpid fix
       if (pg_watcher->pgptr == NULL)
 	{
 	  /*
@@ -3409,21 +3409,21 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	}
       else
 	{
-	  best.freespace = spage_max_space_for_new_record (thread_p, pg_watcher->pgptr);
-	  if (best.freespace >= needed_space)
+	  best.freespace = spage_max_space_for_new_record (thread_p, pg_watcher->pgptr); // 실제로 삽입 가능한 공간까지 더해서 freespace 계산
+	  if (best.freespace >= needed_space) // 실제 필요한 공간보다 찾은 페이지의 freespace가 크다면
 	    {
 	      /*
 	       * Decrement by only the amount space needed by the caller. Don't
 	       * include the unfill factor
 	       */
-	      best.freespace -= record_length + heap_Slotted_overhead;
-	      found = HEAP_FINDSPACE_FOUND;
+	      best.freespace -= record_length + heap_Slotted_overhead; // freespace 계산식에서 실제 사용할 공간 만큼만 빼고, unfill 같은 예비용 공간은 제외함
+	      found = HEAP_FINDSPACE_FOUND; // space 찾았음
 	    }
 
 	  if (hash_is_available)
 	    {
 	      /* Add or refresh the free space of the page */
-	      (void) heap_stats_add_bestspace (thread_p, hfid, &best.vpid, best.freespace);
+	      (void) heap_stats_add_bestspace (thread_p, hfid, &best.vpid, best.freespace); // 전역 heap_Bestspace에 현 best에 대한 entry 추가
 	    }
 
 	  if (best_hint_is_used == true)
@@ -3431,16 +3431,16 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	      assert (VPID_EQ (&best.vpid, &(bestspace[best_array_index].vpid)));
 	      assert (best_array_index < HEAP_NUM_BEST_SPACESTATS);
 
-	      bestspace[best_array_index].freespace = best.freespace;
+	      bestspace[best_array_index].freespace = best.freespace; // 전달된 bestspace freespace 값 설정
 	    }
 
-	  if (found != HEAP_FINDSPACE_FOUND)
+	  if (found != HEAP_FINDSPACE_FOUND) // 찾았다면 unfix
 	    {
 	      pgbuf_ordered_unfix (thread_p, pg_watcher);
 	    }
 	}
 
-      if (found == HEAP_FINDSPACE_NOTFOUND)
+      if (found == HEAP_FINDSPACE_NOTFOUND) // 못 찾았다면 인덱스++ 해는데 왜 해주는거지? 다음에 이어서 찾기 위해서인가? 찾았는데 중간검사 과정에서 문제가 있는 경우인가?
 	{
 	  if (best_hint_is_used)
 	    {
@@ -3455,7 +3455,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
     }
 
   idx_worstspace = 0;
-  for (i = 0; i < HEAP_NUM_BEST_SPACESTATS; i++)
+  for (i = 0; i < HEAP_NUM_BEST_SPACESTATS; i++) // 0 ~ 10 인덱스 돌면서 가장 작은 freespace index를 idx_worstspace로 설정
     {
       /* find worst space in bestspace */
       if (bestspace[idx_worstspace].freespace > bestspace[i].freespace)
@@ -3465,7 +3465,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 
       /* update bestspace of heap header page if found best page at memory hash table */
       if (best_hint_is_used == false && found == HEAP_FINDSPACE_FOUND && VPID_EQ (&best.vpid, &bestspace[i].vpid))
-	{
+	{ // best_hint_is_used == false && found == HEAP_FINDSPACE_FOUND 이 두 조건이 공존할 수 있나?
 	  bestspace[i].freespace = best.freespace;
 	}
     }
@@ -3475,7 +3475,7 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
    * which may not be accurate. This is used for future lookups (where to
    * start) into the findbest space ring.
    */
-  *idx_badspace = idx_worstspace;
+  *idx_badspace = idx_worstspace; // 찾은 idx_worstspace -> idx_badspace로 반환
 
   /*
    * Reset back the timeout value of the transaction
@@ -3536,13 +3536,13 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
    *       exclusive mode, the rest of the heap is locked.
    */
 
-  vpid.volid = hfid->vfid.volid;
+  vpid.volid = hfid->vfid.volid; // 매개변수 hfid 값 vpid에 복사
   vpid.pageid = hfid->hpgid;
 
   addr_hdr.vfid = &hfid->vfid;
   addr_hdr.offset = HEAP_HEADER_AND_CHAIN_SLOTID;
 
-  error_code = pgbuf_ordered_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, &hdr_page_watcher); // page 자체를 fix
+  error_code = pgbuf_ordered_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, &hdr_page_watcher); // vpid fix. hdr_page_watcher에 vpid 관련 page 있는듯
   if (error_code != NO_ERROR)
     {
       /* something went wrong. Unable to fetch header page */
@@ -3562,40 +3562,41 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
       goto error;
     }
 
-  heap_hdr = (HEAP_HDR_STATS *) hdr_recdes.data; // hdr_recdes.data에는 heap_header가 있음
+  heap_hdr = (HEAP_HDR_STATS *) hdr_recdes.data; // hdr_recdes의 data를 heap_hdr에 저장. best page를 찾으면서 heap header에 정보를 기록하려는듯
 
   if (isnew_rec == true) // rec_type이 NEWHOME인지 체크
     {
-      heap_hdr->estimates.num_recs += 1;
-      if (newrec_size > DB_PAGESIZE)
+      heap_hdr->estimates.num_recs += 1; // 새로운 record이면 heap_hdr의 record 수 + 1
+      if (newrec_size > DB_PAGESIZE) // 새 record가 page 크기보다 크면 페이지 수 + 1
 	{
 	  heap_hdr->estimates.num_pages += CEIL_PTVDIV (newrec_size, DB_PAGESIZE);
 	}
     }
-  heap_hdr->estimates.recs_sumlen += (float) newrec_size;
+  heap_hdr->estimates.recs_sumlen += (float) newrec_size; // 전체 record 길이를 전달된 인자의 길이만큼 +
 
-  assert (!heap_is_big_length (needed_space));
+  assert (!heap_is_big_length (needed_space)); // overflow 대상 아님을 검증. overflow 파일 대상은 이 함수에서 처리 안 함
   /* Take into consideration the unfill factor for pages with objects */
   total_space = needed_space + heap_Slotted_overhead + heap_hdr->unfill_space;
-  if (heap_is_big_length (total_space))
+   // total_space는 삽입을 위해 필요한 공간. update를 위해 남겨둔 크기(default: 페이지/10) 만큼은 insert하지 않기 위해 unfill space도 확보
+  if (heap_is_big_length (total_space)) // total_space 계산했을 때 overflow page 대상인지 확인
     {
-      total_space = needed_space + heap_Slotted_overhead;
+      total_space = needed_space + heap_Slotted_overhead; // 왜 need_space를 한 번 더 더해주는거지??
     }
 
-  try_find = 0;
+  try_find = 0; // 찾기 시도 횟수?
   while (true)
     {
       try_find++;
       assert (pg_watcher->pgptr == NULL);
-      if (heap_stats_find_page_in_bestspace (thread_p, hfid, heap_hdr->estimates.best, &(heap_hdr->estimates.head),
-					     needed_space, total_space, scan_cache, pg_watcher) == HEAP_FINDSPACE_ERROR)
+      if (heap_stats_find_page_in_bestspace (thread_p, hfid, heap_hdr->estimates.best, &(heap_hdr->estimates.head), // heap_hdr의 bestspace 배열 전달하고
+					     needed_space, total_space, scan_cache, pg_watcher) == HEAP_FINDSPACE_ERROR) // 이 안에서 basespace 찾기 시도
 	{
 	  ASSERT_ERROR ();
 	  assert (pg_watcher->pgptr == NULL);
 	  pgbuf_ordered_unfix (thread_p, &hdr_page_watcher);
 	  goto error;
 	}
-      if (pg_watcher->pgptr != NULL)
+      if (pg_watcher->pgptr != NULL) // heap_hdr.bestspace에서 bestspace를 찾았다면 종료
 	{
 	  /* found the page */
 	  break;
@@ -3661,7 +3662,7 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
 	}
     }
 
-  if (pg_watcher->pgptr == NULL)
+  if (pg_watcher->pgptr == NULL) // 충분한 크기의 page를 찾지 못했다면
     {
       /*
        * None of the best pages has the needed space, allocate a new page.
@@ -3679,12 +3680,12 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
     }
 
   addr_hdr.pgptr = hdr_page_watcher.pgptr;
-  log_skip_logging (thread_p, &addr_hdr);
-  pgbuf_ordered_set_dirty_and_free (thread_p, &hdr_page_watcher);
+  log_skip_logging (thread_p, &addr_hdr); // 이 함수에서 아무것도 안 함
+  pgbuf_ordered_set_dirty_and_free (thread_p, &hdr_page_watcher); // hdr_page dirty 설정
 
   PERF_UTIME_TRACKER_TIME (thread_p, &time_find_best_page, PSTAT_HF_HEAP_FIND_BEST_PAGE);
 
-  return pg_watcher->pgptr;
+  return pg_watcher->pgptr; // 찾은 page 반환
 
 error:
   PERF_UTIME_TRACKER_TIME (thread_p, &time_find_best_page, PSTAT_HF_HEAP_FIND_BEST_PAGE);
@@ -5467,6 +5468,11 @@ end:
   vacuum_log_add_dropped_file (thread_p, &hfid->vfid, class_oid, VACUUM_LOG_ADD_DROPPED_FILE_UNDO);
 
   logpb_force_flush_pages (thread_p);
+
+  // if (class_oid != &null_oid)
+  //   {
+  //     error_code = mkdir ("/home/chijun/testdb/lob/1234", 0744);
+  //   }
 
   return NO_ERROR;
 
@@ -20471,12 +20477,12 @@ heap_get_insert_location_with_lock (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONT
   assert (context->type == HEAP_OPERATION_INSERT);
   assert (context->recdes_p != NULL);
 
-  if (home_hint_p == NULL)
+  if (home_hint_p == NULL) // hint가 없다면
     {
       /* find and fix page for insert */
       if (heap_stats_find_best_page (thread_p, &context->hfid, context->recdes_p->length,
 				     (context->recdes_p->type != REC_NEWHOME), context->recdes_p->length,
-				     context->scan_cache_p, context->home_page_watcher_p) == NULL)
+				     context->scan_cache_p, context->home_page_watcher_p) == NULL) // context->home_page_watcher_p에 찾은 page 반환
 	{
 	  ASSERT_ERROR_AND_SET (error_code);
 	  return error_code;
@@ -20497,7 +20503,7 @@ heap_get_insert_location_with_lock (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONT
   assert (context->home_page_watcher_p->pgptr != NULL);
 
   /* partially populate output OID */
-  context->res_oid.volid = pgbuf_get_volume_id (context->home_page_watcher_p->pgptr);
+  context->res_oid.volid = pgbuf_get_volume_id (context->home_page_watcher_p->pgptr); // insert를 위해 찾은 페이지의 volid, pageid get
   context->res_oid.pageid = pgbuf_get_page_id (context->home_page_watcher_p->pgptr);
 
   /*
@@ -20529,8 +20535,8 @@ heap_get_insert_location_with_lock (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONT
   /* slot_id == slot_count means add new slot */
   for (slot_id = 0; slot_id <= slot_count; slot_id++)
     {
-      slot_id = spage_find_free_slot (context->home_page_watcher_p->pgptr, NULL, slot_id);
-      if (slot_id == SP_ERROR)
+      slot_id = spage_find_free_slot (context->home_page_watcher_p->pgptr, NULL, slot_id); // 처음부터 끝 id까지 돌면서 free slot 찾아오기
+      if (slot_id == SP_ERROR)                       // 만약 lock 불가능하다면(다른 트랜잭션에서 insert 후 delete mark한 slot이라면) 다시 해당 위치부터free_slot 찾기
 	{
 	  break;		/* this will not happen */
 	}
@@ -20780,7 +20786,7 @@ heap_insert_physical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
 
   /* physical insertion */
   if (spage_insert_at (thread_p, context->home_page_watcher_p->pgptr, context->res_oid.slotid, context->recdes_p) !=
-      SP_SUCCESS)
+      SP_SUCCESS) // context대로 spage insert 수행
     {
       er_set (ER_FATAL_ERROR_SEVERITY, ARG_FILE_LINE, ER_GENERIC_ERROR, 0);
       OID_SET_NULL (&context->res_oid);
