@@ -7507,7 +7507,7 @@ locator_attribute_info_force (THREAD_ENTRY * thread_p, const HFID * hfid, OID * 
 	  HEAP_GET_CONTEXT context;
 
 	  /* don't consider visiblity, just get the last version of the object */
-	  heap_init_get_context (thread_p, &context, oid, &class_oid, &copy_recdes, scan_cache, COPY, NULL_CHN);
+	  heap_init_get_context (thread_p, &context, oid, &class_oid, &copy_recdes, scan_cache, COPY, NULL_CHN); // copy_recdes에 oid에 해당하는 레코드 삽입
 	  scan = heap_get_last_version (thread_p, &context);
 	  heap_clean_get_context (thread_p, &context);
 
@@ -7569,7 +7569,7 @@ locator_attribute_info_force (THREAD_ENTRY * thread_p, const HFID * hfid, OID * 
       old_recdes = &copy_recdes;
 
       /* Fall through */
-
+    // 위 LC_FLUSH_UPDATE에서 일부러 break를 안 해서 insert까지 가능하게 함
     case LC_FLUSH_INSERT:
     case LC_FLUSH_INSERT_PRUNE:
     case LC_FLUSH_INSERT_PRUNE_VERIFY:
@@ -7583,7 +7583,7 @@ locator_attribute_info_force (THREAD_ENTRY * thread_p, const HFID * hfid, OID * 
 	}
 
       /* Assume that it has indices */
-      if (LC_IS_FLUSH_INSERT (operation))
+      if (LC_IS_FLUSH_INSERT (operation)) // operation이 insert라면
 	{
 	  error_code =
 	    locator_insert_force (thread_p, &class_hfid, &class_oid, oid, &new_recdes, true, op_type, scan_cache,
@@ -8335,7 +8335,7 @@ locator_update_index (THREAD_ENTRY * thread_p, RECDES * new_recdes, RECDES * old
   aligned_oldbuf = PTR_ALIGN (oldbuf, MAX_ALIGNMENT);
 
   new_num_found = heap_attrinfo_start_with_index (thread_p, class_oid, NULL, &space_attrinfo[0], &new_idx_info, false);
-  num_btids = new_idx_info.num_btids;
+  num_btids = new_idx_info.num_btids;                                                               // read_value를 위한 HEAP_CACHE_ATTRINFO 구조체를 채워줌
   if (new_num_found < 0)
     {
       return ER_FAILED;
@@ -8343,7 +8343,7 @@ locator_update_index (THREAD_ENTRY * thread_p, RECDES * new_recdes, RECDES * old
   new_attrinfo = &space_attrinfo[0];
 
   old_num_found = heap_attrinfo_start_with_index (thread_p, class_oid, NULL, &space_attrinfo[1], &old_idx_info, false);
-  old_num_btids = old_idx_info.num_btids;
+  old_num_btids = old_idx_info.num_btids;                                                               // read_value를 위한 HEAP_CACHE_ATTRINFO 구조체를 채워줌
   if (old_num_found < 0)
     {
       error_code = ER_FAILED;

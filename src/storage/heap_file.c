@@ -92,7 +92,7 @@ static int rv;
 /* ATTRIBUTE LOCATION */
 
 #define OR_FIXED_ATTRIBUTES_OFFSET_BY_OBJ(obj, nvars) \
-  (OR_HEADER_SIZE(obj) + OR_VAR_TABLE_SIZE_INTERNAL(nvars, OR_GET_OFFSET_SIZE(obj)))
+  (OR_HEADER_S IZE(obj) + OR_VAR_TABLE_SIZE_INTERNAL(nvars, OR_GET_OFFSET_SIZE(obj)))
 
 #define HEAP_GUESS_NUM_ATTRS_REFOIDS 100
 #define HEAP_GUESS_NUM_INDEXED_ATTRS 100
@@ -338,7 +338,7 @@ struct heap_classrepr_lock
 };
 
 typedef struct heap_classrepr_hash HEAP_CLASSREPR_HASH;
-struct heap_classrepr_hash
+struct heap_classrepr_hash // 이 구조체는 head의 역할을 함. hash_next로 다음 인덱스를 검색
 {
   pthread_mutex_t hash_mutex;
   int idx;
@@ -355,11 +355,11 @@ struct heap_classrepr_LRU_list
 };
 
 typedef struct heap_classrepr_free_list HEAP_CLASSREPR_FREE_LIST;
-struct heap_classrepr_free_list
+struct heap_classrepr_free_list // classrepr 배열의 빈 공간만 다루는 배열
 {
-  pthread_mutex_t free_mutex;
-  HEAP_CLASSREPR_ENTRY *free_top;
-  int free_cnt;
+  pthread_mutex_t free_mutex; // free_list에 접근하려면 이 mutex를 잡아야 하는듯
+  HEAP_CLASSREPR_ENTRY *free_top; // 빈 공간의 배열에서 가장 첫 번째(할당가능한 첫 번째 인덱스라 보면 될듯) 객체
+  int free_cnt; // 빈 공간 개수
 };
 
 typedef struct heap_classrepr_cache HEAP_CLASSREPR_CACHE;
@@ -995,7 +995,7 @@ heap_stats_entry_free (THREAD_ENTRY * thread_p, void *data, void *args)
  */
 static HEAP_STATS_ENTRY *
 heap_stats_add_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * vpid, int freespace)
-{
+{ // 사용하려고 찾은 bestspace를 전역 heap_Bestspace에 entry 추가/갱신(기존 bestspace를 사용했다면 freespace가 수정됐으니)
   HEAP_STATS_ENTRY *ent;
   int rc;
   PERF_UTIME_TRACKER time_best_space = PERF_UTIME_TRACKER_INITIALIZER;
@@ -1234,7 +1234,7 @@ heap_scan_pb_lock_and_fetch_debug (THREAD_ENTRY * thread_p, const VPID * vpid_pt
   /* TODO: simply check if lock can be other LOCKs than X_LOCK or S_LOCK. */
   assert (lock == S_LOCK || lock == X_LOCK);
 
-  if (scan_cache != NULL)
+  if (scan_cache != NULL) // 인자로 전달된 scan_cache가 null이 아니라면
     {
       if (scan_cache->page_latch == NULL_LOCK)
 	{
@@ -1247,7 +1247,7 @@ heap_scan_pb_lock_and_fetch_debug (THREAD_ENTRY * thread_p, const VPID * vpid_pt
 	  assert (page_lock != NA_LOCK);
 	}
     }
-  else
+  else // 인자로 전달된 scan_cache가 null이라면
     {
       page_lock = lock;
     }
@@ -1659,7 +1659,7 @@ heap_classrepr_entry_remove_from_LRU (HEAP_CLASSREPR_ENTRY * cache_entry)
 	}
       else
 	{
-	  cache_entry->prev->next = cache_entry->next;
+	  cache_entry->prev->next = cache_entry->next; // prev가 가리키고 있는 next node를 next로 교체. 그냥 깊게 보지 말고 LRU 리스트 node 설정해준다고 보면 됨
 	}
 
       if (cache_entry == heap_Classrepr->LRU_list.LRU_bottom)
@@ -1699,12 +1699,12 @@ heap_classrepr_decache_guessed_last (const OID * class_oid)
 
   if (class_oid != NULL)
     {
-      hash_anchor = &heap_Classrepr->hash_table[REPR_HASH (class_oid)];
+      hash_anchor = &heap_Classrepr->hash_table[REPR_HASH (class_oid)]; // heap_Classrepr은 전역변수. classs_oid 받아와서 hash_anchor에 할당
 
     search_begin:
       rv = pthread_mutex_lock (&hash_anchor->hash_mutex);
 
-      for (cache_entry = hash_anchor->hash_next; cache_entry != NULL; cache_entry = cache_entry->hash_next)
+      for (cache_entry = hash_anchor->hash_next; cache_entry != NULL; cache_entry = cache_entry->hash_next) // hash_anchor가 null이 아닐 때까지 탐색
 	{
 	  if (OID_EQ (class_oid, &cache_entry->class_oid))
 	    {
@@ -1736,7 +1736,7 @@ heap_classrepr_decache_guessed_last (const OID * class_oid)
 	}
 
       /* class_oid cache_entry is not found */
-      if (cache_entry == NULL)
+      if (cache_entry == NULL) // cache_entry가 NULL이면 return
 	{
 	  pthread_mutex_unlock (&hash_anchor->hash_mutex);
 	  return NO_ERROR;
@@ -1906,7 +1906,7 @@ heap_classrepr_restart_cache (void) // 비정상으로 재시작됐을 때 class
  */
 int
 heap_classrepr_free (OR_CLASSREP * classrep, int *idx_incache)
-{
+{ // 깊게 보려면 entry의 node 연결 방식을 알아야 하므로, 현재 node들이 연결되어 있는 상태에서 idx_incache에 해당하는 entry만 fcnt를 -1하고, fcnt가 0이면 entry 삭제해줌
   HEAP_CLASSREPR_ENTRY *cache_entry;
   int rv;
   int ret = NO_ERROR;
@@ -1917,11 +1917,11 @@ heap_classrepr_free (OR_CLASSREP * classrep, int *idx_incache)
       return NO_ERROR;
     }
 
-  cache_entry = &heap_Classrepr->area[*idx_incache];
+  cache_entry = &heap_Classrepr->area[*idx_incache]; // 전역변수 heap_Classrepr에서 entry 탐색
 
   rv = pthread_mutex_lock (&cache_entry->mutex);
-  cache_entry->fcnt--;
-  if (cache_entry->fcnt == 0)
+  cache_entry->fcnt--; // free할 것이기 때문에 fix count -1
+  if (cache_entry->fcnt == 0) // fcnt가 0이면 아예 entry를 삭제하고, 0이 아니면 fcnt만 -1 함
     {
       /*
        * Is this entry declared to be decached
@@ -1973,7 +1973,7 @@ heap_classrepr_free (OR_CLASSREP * classrep, int *idx_incache)
 	}
     }
   pthread_mutex_unlock (&cache_entry->mutex);
-  *idx_incache = -1;
+  *idx_incache = -1; // cache_entry->fcnt가 아직 1 이상일 때도 -1로 박아버리는 이유가 뭐지?
 
   return ret;
 }
@@ -1992,8 +1992,8 @@ enum
  */
 static int
 heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_anchor, const OID * class_oid)
-{
-  HEAP_CLASSREPR_LOCK *cur_lock_entry;
+{ // 다른 스레드에서 class_oid에 접근하는 것을 막기 위해 lock을 걸어줌. 일반 mutex랑 다르게 전역변수 heap_Classrepr의 엔트리에 lock_table에 class_oid를 등록함.
+  HEAP_CLASSREPR_LOCK *cur_lock_entry;                          // 그럼 다른 스레드는 해당 class_oid를 찾으면 대기큐에 자신의 스레드 정보를 넣는 것 같음
   THREAD_ENTRY *cur_thrd_entry;
 
   if (thread_p == NULL)
@@ -2007,7 +2007,7 @@ heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_a
   cur_thrd_entry = thread_p;
 
   for (cur_lock_entry = hash_anchor->lock_next; cur_lock_entry != NULL; cur_lock_entry = cur_lock_entry->lock_next)
-    {
+    { // 인자로 전달받은 hash_anchor->lock_next를 뒤지면서 null이 나올 때까지 찾음
       if (OID_EQ (&cur_lock_entry->class_oid, class_oid))
 	{
 	  cur_thrd_entry->next_wait_thrd = cur_lock_entry->next_wait_thrd;
@@ -2030,13 +2030,13 @@ heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_a
 	}
     }
 
-  cur_lock_entry = &heap_Classrepr->lock_table[cur_thrd_entry->index];
-  cur_lock_entry->class_oid = *class_oid;
+  cur_lock_entry = &heap_Classrepr->lock_table[cur_thrd_entry->index]; // 스레드에 따라 idx가 있는걸 heap_Classrepr->lock_table에서 찾아서 주는듯
+  cur_lock_entry->class_oid = *class_oid; // class_oid 할당
   cur_lock_entry->next_wait_thrd = NULL;
   cur_lock_entry->lock_next = hash_anchor->lock_next;
-  hash_anchor->lock_next = cur_lock_entry;
+  hash_anchor->lock_next = cur_lock_entry; // 현재 엔트리를 전달받은 hash_anchor의 lock_next에 삽입
 
-  pthread_mutex_unlock (&hash_anchor->hash_mutex);
+  pthread_mutex_unlock (&hash_anchor->hash_mutex); // 엔트리 삽입까지 끝났으니 해당 엔트리 mutex는 해제
 
   return LOCK_ACQUIRED;		/* lock acquired. */
 }
@@ -2062,10 +2062,10 @@ heap_classrepr_unlock_class (HEAP_CLASSREPR_HASH * hash_anchor, const OID * clas
     }
 
   prev_lock_entry = NULL;
-  cur_lock_entry = hash_anchor->lock_next;
+  cur_lock_entry = hash_anchor->lock_next; // 현재 lock entry 할당. 왜 next가 현재를 나타내는지는 모르겠음
   while (cur_lock_entry != NULL)
     {
-      if (OID_EQ (&cur_lock_entry->class_oid, class_oid))
+      if (OID_EQ (&cur_lock_entry->class_oid, class_oid)) // 전달된 class_oid와 같은 내용이면 pass
 	{
 	  break;
 	}
@@ -2082,15 +2082,15 @@ heap_classrepr_unlock_class (HEAP_CLASSREPR_HASH * hash_anchor, const OID * clas
 
   if (prev_lock_entry == NULL)
     {
-      hash_anchor->lock_next = cur_lock_entry->lock_next;
+      hash_anchor->lock_next = cur_lock_entry->lock_next; // 다음 노드 작업
     }
   else
     {
       prev_lock_entry->lock_next = cur_lock_entry->lock_next;
     }
-  cur_lock_entry->lock_next = NULL;
+  cur_lock_entry->lock_next = NULL; // 다음 노드는 null로 설정. 그래야 다른 스레드에서 쓸 수 있는듯
   pthread_mutex_unlock (&hash_anchor->hash_mutex);
-  for (cur_thrd_entry = cur_lock_entry->next_wait_thrd; cur_thrd_entry != NULL;
+  for (cur_thrd_entry = cur_lock_entry->next_wait_thrd; cur_thrd_entry != NULL; // 동일한 lock_entry에 대기하고 있는 스레드 큐 차례로 깨워서 일 진행
        cur_thrd_entry = cur_lock_entry->next_wait_thrd)
     {
       cur_lock_entry->next_wait_thrd = cur_thrd_entry->next_wait_thrd;
@@ -2125,21 +2125,21 @@ heap_classrepr_entry_alloc (void)
       goto check_LRU_list;
     }
 
-  rv = pthread_mutex_lock (&heap_Classrepr->free_list.free_mutex);
+  rv = pthread_mutex_lock (&heap_Classrepr->free_list.free_mutex); // heap_Classrepr의 free_list mutex 잠금
   if (heap_Classrepr->free_list.free_top == NULL)
     {
       pthread_mutex_unlock (&heap_Classrepr->free_list.free_mutex);
       cache_entry = NULL;
     }
-  else
+  else // free_list의 top이 null이 아니면 사용하는 이유를 모르겠음. null이어야 값 할당하고 사용하는거 아닌가?
     {
-      cache_entry = heap_Classrepr->free_list.free_top;
-      heap_Classrepr->free_list.free_top = cache_entry->next;
-      heap_Classrepr->free_list.free_cnt--;
-      pthread_mutex_unlock (&heap_Classrepr->free_list.free_mutex);
+      cache_entry = heap_Classrepr->free_list.free_top; // free list에서 가장 첫 인덱스를 받아옴
+      heap_Classrepr->free_list.free_top = cache_entry->next; // free list는 다음 인덱스를 가리키게 함. 이래야 현재 사용한 free list의 다음부분을 다른 스레드가 사용 가능
+      heap_Classrepr->free_list.free_cnt--; // 전역 변수의 free list 개수 1 감소
+      pthread_mutex_unlock (&heap_Classrepr->free_list.free_mutex); // free list에서 요소 하나 꺼내 섰으니 잠금 해제
 
-      rv = pthread_mutex_lock (&cache_entry->mutex);
-      cache_entry->next = NULL;
+      rv = pthread_mutex_lock (&cache_entry->mutex); // 각 엔트리에도 mutex가 있음.(근데 이걸 잠글 필요가 있나?)
+      cache_entry->next = NULL; // 다른 스레드에서 free list 검색할 때 사용할 수 있게 작업한느 것 같음. 왜 null로 하는지 이해는 안 됨
       cache_entry->zone = ZONE_VOID;
 
       return cache_entry;
@@ -2260,7 +2260,7 @@ heap_classrepr_entry_free (HEAP_CLASSREPR_ENTRY * cache_entry)
 static OR_CLASSREP *
 heap_classrepr_get_from_record (THREAD_ENTRY * thread_p, REPR_ID * last_reprid, const OID * class_oid,
 				RECDES * class_recdes, REPR_ID reprid)
-{
+{ // 인자로 전달된 class_oid의 reprid를 반환
   RECDES peek_recdes;
   RECDES *recdes = NULL;
   HEAP_SCANCACHE scan_cache;
@@ -2275,10 +2275,10 @@ heap_classrepr_get_from_record (THREAD_ENTRY * thread_p, REPR_ID * last_reprid, 
     {
       recdes = class_recdes;
     }
-  else
+  else // class_recdes가 null이면 class_oid에 대한 repr을 반환해야 하므로 scan_cache 객체 생성
     {
-      heap_scancache_quick_start_root_hfid (thread_p, &scan_cache);
-      if (heap_get_class_record (thread_p, class_oid, &peek_recdes, &scan_cache, PEEK) != S_SUCCESS)
+      heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // root_hfid를 hfid로 가진 scan_cache 생성
+      if (heap_get_class_record (thread_p, class_oid, &peek_recdes, &scan_cache, PEEK) != S_SUCCESS) // class_oid의 정보를 peek_recdes에 담아줌
 	{
 	  goto end;
 	}
@@ -2286,13 +2286,13 @@ heap_classrepr_get_from_record (THREAD_ENTRY * thread_p, REPR_ID * last_reprid, 
     }
 
   repr = or_get_classrep (recdes, reprid);
-  if (last_reprid != NULL)
+  if (last_reprid != NULL) // 이 함수를 호출할 때 last_reprid가 null이 아니라면 last_reprid를 반환하려는 recdes에 맞춰서 repr을 설정해달라는 것 같음
     {
       *last_reprid = or_rep_id (recdes);
     }
 
 end:
-  if (class_recdes == NULL)
+  if (class_recdes == NULL) // class_recdes가 null로 호출됐다면 그걸 위해 위에서 만든 scan_cache는 종료해도 됨
     {
       heap_scancache_end (thread_p, &scan_cache);
     }
@@ -2313,8 +2313,9 @@ end:
 OR_CLASSREP *
 heap_classrepr_get (THREAD_ENTRY * thread_p, const OID * class_oid, RECDES * class_recdes, REPR_ID reprid,
 		    int *idx_incache)
-{
-  HEAP_CLASSREPR_ENTRY *cache_entry;
+{ // 목적하는 class의 repr를 찾는 것 같음. 없으면 전역 heap_Classrepr에서 free list에서 만들어오고, 있으면 해당 repr 반환
+// 1. class_oid로 hash_anchor 찾기, 2. hash_anchor의 entry 탐색하면서 class_oid가 맞는지 확인, 3. 찾았으면 repr 값 할당
+  HEAP_CLASSREPR_ENTRY *cache_entry; // class_repr을 찾기 위해 임시로 만든 entry
   HEAP_CLASSREPR_HASH *hash_anchor;
   OR_CLASSREP *repr = NULL;
   OR_CLASSREP *repr_from_record = NULL;
@@ -2324,20 +2325,23 @@ heap_classrepr_get (THREAD_ENTRY * thread_p, const OID * class_oid, RECDES * cla
 
   *idx_incache = -1;
 
-  hash_anchor = &heap_Classrepr->hash_table[REPR_HASH (class_oid)];
-
+  hash_anchor = &heap_Classrepr->hash_table[REPR_HASH (class_oid)]; // 전달된 class_oid로 hash table 탐색해서 repr hash 찾아옴
+  /* heap_Classrepr라는 전역변수에 hash_table이라는 배열이 있음
+    class_oid로 생성한 hash값으로 idx를 삼고 hash_table 배열 검색. 첫 insert의 경우 해당하는 repr_entry가 캐싱되어 있지 않음
+    hash_table은 hash_next로 인덱스 탐색을 함
+  */
   /* search entry with class_oid from hash chain */
 search_begin:
-  r = pthread_mutex_lock (&hash_anchor->hash_mutex);
+  r = pthread_mutex_lock (&hash_anchor->hash_mutex); // 전역 변수 heap_Classrepr의 hash table에서 찾은 정보의 hash_mutex 잠금
 
-  for (cache_entry = hash_anchor->hash_next; cache_entry != NULL; cache_entry = cache_entry->hash_next)
-    {
-      if (OID_EQ (class_oid, &cache_entry->class_oid))
+  for (cache_entry = hash_anchor->hash_next; cache_entry != NULL; cache_entry = cache_entry->hash_next) // hash_next가 null일 때까지 반복해서 탐색
+    { //  왜 next부터 시작할까??
+      if (OID_EQ (class_oid, &cache_entry->class_oid)) // 찾은 cache_entry의 class_oid가 인자로 전달된 class_oid와 같다면
 	{
-	  r = pthread_mutex_trylock (&cache_entry->mutex);
-	  if (r == 0)
+	  r = pthread_mutex_trylock (&cache_entry->mutex); // entry의 mutex 잠금 시도
+	  if (r == 0) // mutext_trylock이 성공했다면
 	    {
-	      pthread_mutex_unlock (&hash_anchor->hash_mutex);
+	      pthread_mutex_unlock (&hash_anchor->hash_mutex); // hash는 mutex 잠금 해제
 	    }
 	  else
 	    {
@@ -2353,7 +2357,7 @@ search_begin:
 	      r = pthread_mutex_lock (&cache_entry->mutex);
 	    }
 	  /* check if cache_entry is used by others */
-	  if (!OID_EQ (class_oid, &cache_entry->class_oid))
+	  if (!OID_EQ (class_oid, &cache_entry->class_oid)) // class_oid와 entry의 class_oid가 같은지 재확인하는데, 다른 스레드에서 entry를 가로챘을 경우를 고려하는 것 같음
 	    {
 	      pthread_mutex_unlock (&cache_entry->mutex);
 	      goto search_begin;
@@ -2363,7 +2367,7 @@ search_begin:
 	}
     }
 
-  if (cache_entry == NULL)
+  if (cache_entry == NULL) // 위에서 cache_entry를 찾지 못했다면
     {
       if (repr_from_record == NULL)
 	{
@@ -2373,8 +2377,8 @@ search_begin:
 	   *       read representation from heap and restart the process to ensure consistency. */
 	  VPID vpid_of_class;
 	  PAGE_PTR page_of_class = NULL;
-	  VPID_GET_FROM_OID (&vpid_of_class, class_oid);
-	  page_of_class = pgbuf_fix (thread_p, &vpid_of_class, OLD_PAGE, PGBUF_LATCH_READ, PGBUF_CONDITIONAL_LATCH);
+	  VPID_GET_FROM_OID (&vpid_of_class, class_oid); // class_oid로 vpid_of_class 획득
+	  page_of_class = pgbuf_fix (thread_p, &vpid_of_class, OLD_PAGE, PGBUF_LATCH_READ, PGBUF_CONDITIONAL_LATCH); // class_oid를 read모드로 fix
 	  if (page_of_class == NULL)
 	    {
 	      /* we cannot hold mutex */
@@ -2387,7 +2391,7 @@ search_begin:
 	      pthread_mutex_unlock (&hash_anchor->hash_mutex);
 	    }
 	  repr_from_record = heap_classrepr_get_from_record (thread_p, &last_reprid, class_oid, class_recdes, reprid);
-	  if (repr_from_record == NULL)
+	  if (repr_from_record == NULL)             // class_oid의 repr을 repr_from_record에, reprid를 last_reprid에 얻어오기
 	    {
 	      ASSERT_ERROR ();
 
@@ -2398,7 +2402,7 @@ search_begin:
 		}
 	      goto exit;
 	    }
-	  if (reprid == NULL_REPRID)
+	  if (reprid == NULL_REPRID) // reprid가 null로 전달됐다면 위에서 얻은 last_reprid로 대체
 	    {
 	      reprid = last_reprid;
 	    }
@@ -2417,7 +2421,7 @@ search_begin:
 	    }
 	  else
 	    {
-	      pgbuf_unfix_and_init (thread_p, page_of_class);
+	      pgbuf_unfix_and_init (thread_p, page_of_class); // class_oid의 repr 관련 객체 다 얻었으니 unfix
 	      /* hash mutex was kept */
 	      /* fall through */
 	    }
@@ -2428,8 +2432,8 @@ search_begin:
 #ifdef SERVER_MODE
       /* class_oid was not found. Lock class_oid. heap_classrepr_lock_class () release hash_anchor->hash_lock */
       r = heap_classrepr_lock_class (thread_p, hash_anchor, class_oid);
-      if (r != LOCK_ACQUIRED)
-	{
+      if (r != LOCK_ACQUIRED) // 위에서 hash_anchor entry로 class_oid를 찾지 못했으니 hash_anchor 전달하여 전역 변수 heap_Classrepr에 class_oid 등록
+	{                     // class_oid에 현재 스레드 정보를 등록하면 다른 스레드에서 class_oid에 접근할 때 lock 큐에 등록하고 대기하는 방식 같음
 	  if (r == NEED_TO_RETRY)
 	    {
 	      goto search_begin;
@@ -2443,7 +2447,7 @@ search_begin:
 #endif
 
       /* Get free entry */
-      cache_entry = heap_classrepr_entry_alloc ();
+      cache_entry = heap_classrepr_entry_alloc (); // 위에서 cache_entry를 찾지 못했으니 전역 heap_Classrepr의 free list에서 enty 할당 받아옴
       if (cache_entry == NULL)
 	{
 	  /* if all cache entry is busy, return disk repr. */
@@ -2510,10 +2514,10 @@ search_begin:
 	  goto exit;
 	}
 
-      cache_entry->repr[reprid] = repr_from_record;
-      repr = cache_entry->repr[reprid];
-      repr_from_record = NULL;
-      cache_entry->last_reprid = last_reprid;
+      cache_entry->repr[reprid] = repr_from_record; // 위에서 얻은 repr을 reprid번째 인덱스에 할당 (cache_entry가 전역 heap_Classrepr라고 보면 됨)
+      repr = cache_entry->repr[reprid]; // 지역변수 repr에 받아온 값 할당
+      repr_from_record = NULL; // 다 썼으면 초기화
+      cache_entry->last_reprid = last_reprid; // 전역 cache_entry에 reprid 할당
       if (reprid != last_reprid)
 	{			/* if last repr is not cached */
 	  /* normally, we should not access heap record while keeping mutex in cache entry. however, this entry was not
@@ -2522,7 +2526,7 @@ search_begin:
 	  repr_last = NULL;
 	}
 
-      cache_entry->fcnt = 1;
+      cache_entry->fcnt = 1; // fcnt가 접근하고 있는 스레드의 개수 같음. 새로 만들었으니 1로 설정
       cache_entry->class_oid = *class_oid;
 #ifdef DEBUG_CLASSREPR_CACHE
       r = pthread_mutex_lock (&heap_Classrepr->num_fix_entries_mutex);
@@ -2530,12 +2534,12 @@ search_begin:
       pthread_mutex_unlock (&heap_Classrepr->num_fix_entries_mutex);
 
 #endif /* DEBUG_CLASSREPR_CACHE */
-      *idx_incache = cache_entry->idx;
+      *idx_incache = cache_entry->idx; // 전역변수의 idx 할당(idx_incache는 인자값임)
 
       /* Add to hash chain, and remove lock for class_oid */
-      r = pthread_mutex_lock (&hash_anchor->hash_mutex);
-      cache_entry->hash_next = hash_anchor->hash_next;
-      hash_anchor->hash_next = cache_entry;
+      r = pthread_mutex_lock (&hash_anchor->hash_mutex); // 위에서 왜 unlock을 해줬지? 다른 스레드에서 해당 엔트리 사용하면 어쩌려고?
+      cache_entry->hash_next = hash_anchor->hash_next; // 다음 노드 연결 작업(깊게 볼 필요 x)
+      hash_anchor->hash_next = cache_entry; // 다음 노드 연결 작업(깊게 볼 필요 x)
 
 #ifdef SERVER_MODE
       (void) heap_classrepr_unlock_class (hash_anchor, class_oid, false);
@@ -2544,15 +2548,15 @@ search_begin:
       heap_classrepr_log_stack ("heap_classrepr_get %d|%d|%d add repr %p to cache_entry %p", OID_AS_ARGS (class_oid),
 				repr, cache_entry);
     }
-  else
+  else // 위 entry 탐색에서 class_oid에 해당하는 entry를 찾았다면
     {
       /* now, we have already cache_entry for class_oid. if it contains repr info for reprid, return it. else load
        * classrepr info for it */
       assert (!cache_entry->force_decache);
 
-      if (reprid == NULL_REPRID)
+      if (reprid == NULL_REPRID) // reprid가 null이면 최근 reprid를 삽입
 	{
-	  reprid = cache_entry->last_reprid;
+	  reprid = cache_entry->last_reprid; // 등록된 entry의 last_reprid 할당
 	}
 
       if (reprid <= NULL_REPRID || reprid > cache_entry->last_reprid || reprid > cache_entry->max_reprid)
@@ -2566,7 +2570,7 @@ search_begin:
 	}
 
       /* reprid cannot be greater than cache_entry->last_reprid. */
-      repr = cache_entry->repr[reprid];
+      repr = cache_entry->repr[reprid]; // repr 필드는 OR_CLASSREP 타입임. cache_entry은 이미 전역 변수의 내용을 담았기 때문에 reprid로 repr 반환 가능
       if (repr == NULL)
 	{
 	  /* load repr. info. for reprid of class_oid */
@@ -2594,10 +2598,10 @@ search_begin:
 	    }
 	}
 
-      cache_entry->fcnt++;
+      cache_entry->fcnt++; // fcnt는 해당 class repr_entry가 참조되고 있는 횟수 같음. 이 fcnt가 0이 될 때까지 deallocate가 안 됨(전역 entry에서 해당 repr이 빠지지 않는다는 뜻 같음)
       *idx_incache = cache_entry->idx;
     }
-  pthread_mutex_unlock (&cache_entry->mutex);
+  pthread_mutex_unlock (&cache_entry->mutex); // repr 찾았으니 entry는 mutex 잠금 해제
 
 exit:
   if (repr_from_record != NULL)
@@ -3302,12 +3306,13 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	  PERF_UTIME_TRACKER_START (thread_p, &time_best_space);
 	  rc = pthread_mutex_lock (&heap_Bestspace->bestspace_mutex); // heap_Bestspace는 best space를 찾기 위해 캐싱하는 전역변수
 
-	  while (notfound_cnt < BEST_PAGE_SEARCH_MAX_COUNT
+	  while (notfound_cnt < BEST_PAGE_SEARCH_MAX_COUNT // 이유는 모르지만, hfid 중복되는 entry가 있나봄. 안전장치로 100번으로 제한해놓은듯
 		 && (ent = (HEAP_STATS_ENTRY *) mht_get2 (heap_Bestspace->hfid_ht, hfid, NULL)) != NULL)
-	    { // hash 테이블에서 heap state 관련 뭔가를 찾으면 이 while문 반복. 못 찾으면 while문 조건 해당 X
-	      if (ent->best.freespace >= needed_space)
+	    { // 전역 heap_Bestspace의 hfid hash 테이블에서 hfid에 해당하는 entry가 있는지 검색
+              // 못 찾았다는건 전역 변수 heap_Bestspace에 hfid에 해당하는 entry가 없다는거
+	      if (ent->best.freespace >= needed_space) // 찾은 entry가 필요한 크기만큼 충분하다면
 		{
-		  best = ent->best;
+		  best = ent->best; // 크기가 적합한 entry를 찾았다면 지역변수 best에 할당
 		  assert (best.freespace > 0 && best.freespace <= PGLENGTH_MAX);
 		  break;
 		}
@@ -3318,12 +3323,12 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	      (void) heap_stats_entry_free (thread_p, ent, NULL);
 	      ent = NULL;
 
-	      heap_Bestspace->num_stats_entries--;
+	      heap_Bestspace->num_stats_entries--; // 변수 주석을 보면 캐싱된 entry 중 사용중인 개수인데, 해당 안 되니까 -1해버리는 것 같음
 
 	      notfound_cnt++;
 	    }
 
-	  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex); // mutex 해제
+	  pthread_mutex_unlock (&heap_Bestspace->bestspace_mutex); // 전역 heap_Bestspace의 mutex 해제
 	  PERF_UTIME_TRACKER_TIME (thread_p, &time_best_space, PSTAT_HF_BEST_SPACE_FIND);
 	}
 
@@ -3331,8 +3336,9 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	{
 	  /* Maybe PRM_ID_HF_MAX_BESTSPACE_ENTRIES <= 0 or There is no best space in heap_Bestspace hashtable. We will
 	   * use bestspace hint in heap_header. */
-	  while (best_array_index < HEAP_NUM_BEST_SPACESTATS) // HEAP_NUM_BEST_SPACESTATS만큼 찾기
+	  while (best_array_index < HEAP_NUM_BEST_SPACESTATS) // heap_header의 bestspace[10] 배열 검색
 	    { // 인자로 전달된 bestspace[10] 배열에서 필요한 공간만큼 확보된 인덱스를 찾으면 바로 찾기 완료
+              // 각 heap_header는 10크기의 bestspace배열을 가짐
 	      if (bestspace[best_array_index].freespace >= needed_space) // heap_hdr.bestspace[index]가 nees_space보다 큰 공간이 freespace라면
 		{
 		  best.vpid = bestspace[best_array_index].vpid; // best 객체에 찾은 인덱스의 vpid 할당
@@ -3416,25 +3422,25 @@ heap_stats_find_page_in_bestspace (THREAD_ENTRY * thread_p, const HFID * hfid, H
 	       * Decrement by only the amount space needed by the caller. Don't
 	       * include the unfill factor
 	       */
-	      best.freespace -= record_length + heap_Slotted_overhead; // freespace 계산식에서 실제 사용할 공간 만큼만 빼고, unfill 같은 예비용 공간은 제외함
+	      best.freespace -= record_length + heap_Slotted_overhead; // freespace에서 실제 사용할 공간 만큼 빼버림
 	      found = HEAP_FINDSPACE_FOUND; // space 찾았음
 	    }
 
 	  if (hash_is_available)
 	    {
 	      /* Add or refresh the free space of the page */
-	      (void) heap_stats_add_bestspace (thread_p, hfid, &best.vpid, best.freespace); // 전역 heap_Bestspace에 현 best에 대한 entry 추가
+	      (void) heap_stats_add_bestspace (thread_p, hfid, &best.vpid, best.freespace); // 전역 heap_Bestspace에 현 best에 대한 entry 추가/갱신
 	    }
 
-	  if (best_hint_is_used == true)
+	  if (best_hint_is_used == true) // 전달된 heap_hdr의 bestspace를 사용했다면
 	    {
 	      assert (VPID_EQ (&best.vpid, &(bestspace[best_array_index].vpid)));
 	      assert (best_array_index < HEAP_NUM_BEST_SPACESTATS);
 
-	      bestspace[best_array_index].freespace = best.freespace; // 전달된 bestspace freespace 값 설정
+	      bestspace[best_array_index].freespace = best.freespace; // heap_hdr의 bestspace freespace 값 설정
 	    }
 
-	  if (found != HEAP_FINDSPACE_FOUND) // 찾았다면 unfix
+	  if (found != HEAP_FINDSPACE_FOUND) // 위에서 fix한 vpid가 FOUND 조건에 해당하지 않는다면 unfix
 	    {
 	      pgbuf_ordered_unfix (thread_p, pg_watcher);
 	    }
@@ -3564,8 +3570,8 @@ heap_stats_find_best_page (THREAD_ENTRY * thread_p, const HFID * hfid, int neede
 
   heap_hdr = (HEAP_HDR_STATS *) hdr_recdes.data; // hdr_recdes의 data를 heap_hdr에 저장. best page를 찾으면서 heap header에 정보를 기록하려는듯
 
-  if (isnew_rec == true) // rec_type이 NEWHOME인지 체크
-    {
+  if (isnew_rec == true) // isnew_rec가 true면 rec_type이 NEWHOME이 아님
+    {                    // NEWHOME을 위한 insert라면 전체 레코드 수를 올려줄 필요가 없고, 새로운 record라면 전체 레코드 수를 올려줘야 함
       heap_hdr->estimates.num_recs += 1; // 새로운 record이면 heap_hdr의 record 수 + 1
       if (newrec_size > DB_PAGESIZE) // 새 record가 page 크기보다 크면 페이지 수 + 1
 	{
@@ -5036,7 +5042,7 @@ heap_vpid_next (THREAD_ENTRY * thread_p, const HFID * hfid, PAGE_PTR pgptr, VPID
 #endif /* !NDEBUG */
 
   /* Get either the heap header or chain record */
-  if (spage_get_record (thread_p, pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &recdes, PEEK) != S_SUCCESS)
+  if (spage_get_record (thread_p, pgptr, HEAP_HEADER_AND_CHAIN_SLOTID, &recdes, PEEK) != S_SUCCESS) // heap_chain 얻어오기
     {
       /* Unable to get header/chain record for the given page */
       VPID_SET_NULL (next_vpid);
@@ -5044,12 +5050,12 @@ heap_vpid_next (THREAD_ENTRY * thread_p, const HFID * hfid, PAGE_PTR pgptr, VPID
     }
   else
     {
-      pgbuf_get_vpid (pgptr, next_vpid);
+      pgbuf_get_vpid (pgptr, next_vpid); // 전달된 page를 next_vpid에 할당
       /* Is this the header page ? */
-      if (next_vpid->pageid == hfid->hpgid && next_vpid->volid == hfid->vfid.volid)
+      if (next_vpid->pageid == hfid->hpgid && next_vpid->volid == hfid->vfid.volid) // hfid와 비교해서 일치하면
 	{
-	  heap_hdr = (HEAP_HDR_STATS *) recdes.data;
-	  *next_vpid = heap_hdr->next_vpid;
+	  heap_hdr = (HEAP_HDR_STATS *) recdes.data; // heap_hdr에 heap_chain data 할당
+	  *next_vpid = heap_hdr->next_vpid; // heap_hdr의 다음 페이지(2페이지) 할당. 사실 2페이지부터 레코드가 할당됨
 	}
       else
 	{
@@ -6782,7 +6788,7 @@ heap_ovf_get_capacity (THREAD_ENTRY * thread_p, const OID * ovf_oid, int *ovf_le
  */
 static int
 heap_scancache_check_with_hfid (THREAD_ENTRY * thread_p, HFID * hfid, OID * class_oid, HEAP_SCANCACHE ** scan_cache)
-{
+{ // scancache가 null인지, scancache의 hfid가 전달된 hfid와 같은지 체크
   if (*scan_cache != NULL)
     {
       if ((*scan_cache)->debug_initpattern != HEAP_DEBUG_SCANCACHE_INITPATTERN)
@@ -6800,7 +6806,7 @@ heap_scancache_check_with_hfid (THREAD_ENTRY * thread_p, HFID * hfid, OID * clas
 	   * todo: add assert (false); here
 	   */
 	  r = heap_scancache_reset_modify (thread_p, *scan_cache, hfid, class_oid);
-	  if (r != NO_ERROR)
+	  if (r != NO_ERROR)              // 전달된 hfid와 scancahe의 hfid가 다르다면 초기화하고 hfid 할당
 	    {
 	      return r;
 	    }
@@ -6829,7 +6835,7 @@ static int
 heap_scancache_start_internal (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, const HFID * hfid,
 			       const OID * class_oid, int cache_last_fix_page, bool is_queryscan,
 			       MVCC_SNAPSHOT * mvcc_snapshot)
-{ // 주어진 scancache의 초기값 설정을 해줌(class 정보를 넣어주거나 class_oid가 비어있다면 null로 두거나 등등..)
+{ // 주어진 scancache의 초기값 설정을 해줌(node에 class_oid, hfid 삽입, 나머지는 기본값으로 초기화)
   int ret = NO_ERROR;
 
   if (class_oid != NULL)
@@ -6866,15 +6872,15 @@ heap_scancache_start_internal (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_ca
       /*
        * Scanning the instances of any class in the heap
        */
-      OID_SET_NULL (&scan_cache->node.class_oid);
+      OID_SET_NULL (&scan_cache->node.class_oid); // class_oid null로 설정
 
-      if (hfid == NULL)
+      if (hfid == NULL) // 인자값 hfid도 null이면 scancache의 hfid도 null로 설정
 	{
 	  HFID_SET_NULL (&scan_cache->node.hfid);
 	  scan_cache->node.hfid.vfid.volid = NULL_VOLID;
 	  scan_cache->file_type = FILE_UNKNOWN_TYPE;
 	}
-      else
+      else // hfid가 null이 아니면 hfid 할당
 	{
 	  scan_cache->node.hfid.vfid.volid = hfid->vfid.volid;
 	  scan_cache->node.hfid.vfid.fileid = hfid->vfid.fileid;
@@ -6975,21 +6981,21 @@ heap_scancache_start (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, cons
 int
 heap_scancache_start_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, const HFID * hfid,
 			     const OID * class_oid, int op_type, MVCC_SNAPSHOT * mvcc_snapshot)
-{
+{ // 인자로 주어진 scancache를 init하고 목적을 write로 세팅하는 함수
   OR_CLASSREP *classrepr = NULL;
   int classrepr_cacheindex = -1;
   int i;
   int ret = NO_ERROR;
 
   if (heap_scancache_start_internal (thread_p, scan_cache, hfid, NULL, false, false, mvcc_snapshot) != NO_ERROR)
-    {
+    {                                         // scan_cache의 값을 설정함. class_oid의 인자를 null로 주면서 node.hfid는 전달하고 있는 hfid로 설정하고 나머지는 초기값
       goto exit_on_error;
     }
 
   if (class_oid != NULL)
     {
       ret = heap_scancache_reset_modify (thread_p, scan_cache, hfid, class_oid);
-      if (ret != NO_ERROR)
+      if (ret != NO_ERROR) // scan_cache에 값 할당(hfid, class_oid 등등). X_LOCK 모드로 할당
 	{
 	  goto exit_on_error;
 	}
@@ -6999,7 +7005,7 @@ heap_scancache_start_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cach
       scan_cache->page_latch = X_LOCK;
     }
 
-  if (BTREE_IS_MULTI_ROW_OP (op_type) && class_oid != NULL && !OID_EQ (class_oid, oid_Root_class_oid))
+  if (BTREE_IS_MULTI_ROW_OP (op_type) && class_oid != NULL && !OID_EQ (class_oid, oid_Root_class_oid)) // 여긴 걸린 적이 없음
     {
       /* get class representation to find the total number of indexes */
       classrepr = heap_classrepr_get (thread_p, (OID *) class_oid, NULL, NULL_REPRID, &classrepr_cacheindex);
@@ -7021,7 +7027,7 @@ heap_scancache_start_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cach
 	}
 
       /* free class representation */
-      heap_classrepr_free_and_init (classrepr, &classrepr_cacheindex);
+      heap_classrepr_free_and_init (classrepr, &classrepr_cacheindex); // classrepr free
     }
 
   /* In case of SINGLE_ROW_INSERT, SINGLE_ROW_UPDATE, SINGLE_ROW_DELETE, or SINGLE_ROW_MODIFY, the 'num_btids' and
@@ -7041,7 +7047,7 @@ exit_on_error:
  */
 static int
 heap_scancache_force_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
-{
+{ // 그냥 scancache에서 보고 있는 page가 fix되어 있으면 unfix만 해줌
   if (scan_cache == NULL || scan_cache->debug_initpattern != HEAP_DEBUG_SCANCACHE_INITPATTERN)
     {
       return NO_ERROR;
@@ -7070,18 +7076,18 @@ heap_scancache_force_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cach
 static int
 heap_scancache_reset_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache, const HFID * hfid,
 			     const OID * class_oid)
-{
+{ // scancache에 담은 객체를 write를 위한 객체로 초기화해주는듯
   int ret;
 
-  ret = heap_scancache_force_modify (thread_p, scan_cache);
-  if (ret != NO_ERROR)
+  ret = heap_scancache_force_modify (thread_p, scan_cache); // scan_cache의 page가 fix되어 있으면 unfix만 해줌
+  if (ret != NO_ERROR)                                      // page_watcher fix 안 되어 있으면 그냥 패스
     {
       return ret;
     }
 
-  if (class_oid != NULL)
+  if (class_oid != NULL) // 인자값 class_oid가 null이 아니면
     {
-      if (!OID_EQ (class_oid, &scan_cache->node.class_oid))
+      if (!OID_EQ (class_oid, &scan_cache->node.class_oid)) // 인자값과 scancache의 class_oid가 다르면
 	{
 	  ret = heap_get_class_info (thread_p, class_oid, &scan_cache->node.hfid, &scan_cache->file_type, NULL);
 	  if (ret != NO_ERROR)
@@ -7090,7 +7096,7 @@ heap_scancache_reset_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cach
 	      return ret;
 	    }
 	  assert (HFID_EQ (&scan_cache->node.hfid, hfid));
-	  scan_cache->node.class_oid = *class_oid;
+	  scan_cache->node.class_oid = *class_oid; // scan_cache에 class_oid 할당
 	}
     }
   else
@@ -7116,8 +7122,8 @@ heap_scancache_reset_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cach
 	    }
 	}
     }
-  scan_cache->page_latch = X_LOCK;
-  scan_cache->node.classname = NULL;
+  scan_cache->page_latch = X_LOCK; // 이 함수에서는 scan_cache를 write 목적으로 바꾸기 때문에 X_LOCK가 적당함
+  scan_cache->node.classname = NULL; // 이건 왜 하는지 모르겠음
 
   return ret;
 }
@@ -7340,10 +7346,10 @@ heap_scancache_end_modify (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
 {
   int ret;
 
-  ret = heap_scancache_force_modify (thread_p, scan_cache);
+  ret = heap_scancache_force_modify (thread_p, scan_cache); // scan_cache가 가리키는 page만 unfix해줌
   if (ret == NO_ERROR)
     {
-      ret = heap_scancache_quick_end (thread_p, scan_cache);
+      ret = heap_scancache_quick_end (thread_p, scan_cache); // scan_cache의 값들을 null로 변환
     }
 }
 
@@ -7494,8 +7500,8 @@ heap_get_if_diff_chn (THREAD_ENTRY * thread_p, PAGE_PTR pgptr, INT16 slotid, REC
  */
 SCAN_CODE
 heap_prepare_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, bool is_heap_scan,
-			  NON_EXISTENT_HANDLING non_ex_handling_type)
-{ // 전달된 context의 데이터를 사용할 수 있게 준비 작업해줌(fix..등등)
+			  NON_EXISTENT_HANDLING non_ex_handling_type) // non_ex_handling_type이 LOG_WARNING_IF_DELETED라면
+{ // 전달된 context의 데이터를 사용할 수 있게 준비 작업해줌(fix, class_oid 채우기 등등)   // deleted object를 만났을 때 warning만 남기겠다는 뜻
   SPAGE_SLOT *slot_p = NULL;
   RECDES peek_recdes;
   SCAN_CODE scan = S_SUCCESS;
@@ -7521,9 +7527,9 @@ try_again:
     }
 
   /* Output class_oid if necessary. */
-  if (context->class_oid_p != NULL && OID_ISNULL (context->class_oid_p)
+  if (context->class_oid_p != NULL && OID_ISNULL (context->class_oid_p) // context의 class_oid가 비어있다면
       && heap_get_class_oid_from_page (thread_p, context->home_page_watcher.pgptr, context->class_oid_p) != NO_ERROR)
-    {
+    {    // context에 class_oid 얻어오기. context의 class_oid가 비어있을 경우에만 호출되는데, class_oid가 비어있다는건 class_oid를 작업하기 위해 이 함수를 호출한 것 같음
       /* Unexpected. */
       assert_release (false);
       goto error;
@@ -7632,7 +7638,7 @@ try_again:
 
       goto error;
 
-    case REC_ASSIGN_ADDRESS:
+    case REC_ASSIGN_ADDRESS: // assign_address로 이 함수가 호출된다면 error만 ER_HEAP_NODATA_NEWADDRESS로 설정
       /* Object without content.. only the address has been assigned */
       if (is_heap_scan)
 	{
@@ -7729,7 +7735,7 @@ error:
  */
 SCAN_CODE
 heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_REC_HEADER * mvcc_header)
-{ // 각 데이터 타입에 맞게 mvcc_header를 찾아서 반환해줌
+{ // 각 데이터 타입에 맞게 context의 oid에 있는 mvcc_header를 찾아서 반환해줌
   RECDES peek_recdes;
   SCAN_CODE scan_code;
   PAGE_PTR home_page, forward_page;
@@ -7737,7 +7743,7 @@ heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_
 
   assert (context != NULL && context->oid_p != NULL);
 
-  oid = context->oid_p;
+  oid = context->oid_p; // context에서 oid 꺼내오고
   home_page = context->home_page_watcher.pgptr; // context에는 home/fwd watcher가 모두 있음
   forward_page = context->fwd_page_watcher.pgptr;
 
@@ -7754,20 +7760,20 @@ heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_
   switch (context->record_type)
     {
     case REC_HOME:
-      scan_code = spage_get_record (thread_p, home_page, oid->slotid, &peek_recdes, PEEK);
+      scan_code = spage_get_record (thread_p, home_page, oid->slotid, &peek_recdes, PEEK); // oid에 해당하는 레코드 peek_recdes에 저장
       if (scan_code != S_SUCCESS)
 	{
 	  /* Unexpected. */
 	  assert (false);
 	  return S_ERROR;
 	}
-      if (or_mvcc_get_header (&peek_recdes, mvcc_header) != NO_ERROR)
+      if (or_mvcc_get_header (&peek_recdes, mvcc_header) != NO_ERROR) // peek_recdes의 mvcc_header 반환
 	{
 	  /* Unexpected. */
 	  assert (false);
 	  return S_ERROR;
 	}
-      return S_SUCCESS;
+      return S_SUCCESS; // return
     case REC_BIGONE:
       assert (forward_page != NULL);
       if (heap_get_mvcc_rec_header_from_overflow (forward_page, mvcc_header, &peek_recdes) != NO_ERROR)
@@ -7777,7 +7783,7 @@ heap_get_mvcc_header (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, MVCC_
 	  return S_ERROR;
 	}
       return S_SUCCESS;
-    case REC_RELOCATION:
+    case REC_RELOCATION: // relocation의 경우 forward_page의 record만 다룸
       assert (forward_page != NULL);
       scan_code = spage_get_record (thread_p, forward_page, context->forward_oid.slotid, &peek_recdes, PEEK);
       if (scan_code != S_SUCCESS)
@@ -7848,14 +7854,14 @@ heap_get_record_data_when_all_ready (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT *
 				      context->recdes_p);
     case REC_HOME:
       if (scan_cache_p != NULL && context->ispeeking == COPY && context->recdes_p->data == NULL
-	  && heap_scan_cache_allocate_recdes_data (thread_p, scan_cache_p, context->recdes_p,
+	  && heap_scan_cache_allocate_recdes_data (thread_p, scan_cache_p, context->recdes_p, // ispeeking == COPY라면 context->recdes를 위한 공간 alloc
 						   DB_PAGESIZE * 2) != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
 	  return S_ERROR;
 	}
       return spage_get_record (thread_p, context->home_page_watcher.pgptr, context->oid_p->slotid, context->recdes_p,
-			       context->ispeeking);
+			       context->ispeeking); // context->recdes 할당
     default:
       break;
     }
@@ -7886,14 +7892,14 @@ static SCAN_CODE
 heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid, OID * next_oid, RECDES * recdes,
 		    HEAP_SCANCACHE * scan_cache, bool ispeeking, bool reversed_direction, DB_VALUE ** cache_recordinfo,
 		    sampling_info * sampling)
-{
+{ // 정해진 위치부터 정해진 방향으로 다음(이전) slot 데이터를 반환
   VPID vpid;
   VPID *vpidptr_incache;
   INT16 type = REC_UNKNOWN;
   OID oid;
   RECDES forward_recdes;
   SCAN_CODE scan = S_ERROR;
-  int get_rec_info = cache_recordinfo != NULL;
+  int get_rec_info = cache_recordinfo != NULL; // cache_recordinfo이 null이 아닌 상태로 호출되면 정리 예정. 변수들이 뭘 뜻하는지 모르겠음
   bool is_null_recdata;
   PGBUF_WATCHER old_page_watcher;
   PGBUF_WATCHER rec_info_page_watcher;
@@ -7947,7 +7953,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	  oid.slotid = 0;	/* i.e., will get slot 1 */
 	}
     }
-  else
+  else // next_oid가 null이 아니면
     {
       oid = *next_oid;
     }
@@ -7968,7 +7974,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	   * Fetch the page where the object of OID is stored. Use previous
 	   * scan page whenever possible, otherwise, deallocate the page.
 	   */
-	  if (scan_cache->cache_last_fix_page == true && scan_cache->page_watcher.pgptr != NULL)
+	  if (scan_cache->cache_last_fix_page == true && scan_cache->page_watcher.pgptr != NULL) // cache_last_fix_page는 fix에 대한 정책을 나타내는 것 같은데, heap 내에서는 의미 없을듯
 	    {
 	      vpidptr_incache = pgbuf_get_vpid_ptr (scan_cache->page_watcher.pgptr);
 	      if (!VPID_EQ (&vpid, vpidptr_incache))
@@ -8030,13 +8036,13 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 
 	      while (true)
 		{
-		  if (reversed_direction)
+		  if (reversed_direction) // 역방향이면
 		    {
-		      scan = spage_previous_record (scan_cache->page_watcher.pgptr, &oid.slotid, &forward_recdes, PEEK);
+		      scan = spage_previous_record (scan_cache->page_watcher.pgptr, &oid.slotid, &forward_recdes, PEEK); // 이전 slotid 탐색
 		    }
-		  else
+		  else // 정방향이면
 		    {
-		      scan = spage_next_record (scan_cache->page_watcher.pgptr, &oid.slotid, &forward_recdes, PEEK);
+		      scan = spage_next_record (scan_cache->page_watcher.pgptr, &oid.slotid, &forward_recdes, PEEK); // 다음 slotid 탐색
 		    }
 		  if (scan != S_SUCCESS)
 		    {
@@ -8057,25 +8063,25 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 			}
 		    }
 
-		  if (oid.slotid == HEAP_HEADER_AND_CHAIN_SLOTID)
+		  if (oid.slotid == HEAP_HEADER_AND_CHAIN_SLOTID) // header는 건너뜀
 		    {
 		      /* skip the header */
 		      continue;
 		    }
 		  type = spage_get_record_type (scan_cache->page_watcher.pgptr, oid.slotid);
-		  if (type == REC_NEWHOME || type == REC_ASSIGN_ADDRESS || type == REC_UNKNOWN)
+		  if (type == REC_NEWHOME || type == REC_ASSIGN_ADDRESS || type == REC_UNKNOWN) // REC_NEWHOME, REC_ASSIGN_ADDRESS, REC_UNKNOWN는 원본 데이터가 아니므로 skip
 		    {
 		      /* skip */
 		      continue;
 		    }
 
-		  break;
+		  break; // forward_recdes에 데이터 찾았으면 while문 탈출
 		}
 	    }
 
 	  if (scan != S_SUCCESS)
 	    {
-	      if (scan == S_END)
+	      if (scan == S_END) // next oid가 없다면
 		{
 		  /* Find next page of heap and continue scanning */
 		  if (reversed_direction)
@@ -8127,7 +8133,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	  else
 	    {
 	      /* found a new object */
-	      break;
+	      break; // 찾았으면 종료
 	    }
 	}
 
@@ -8148,7 +8154,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 
 	  scan =
 	    heap_scan_get_visible_version (thread_p, &oid, class_oid, recdes, &forward_recdes, scan_cache, ispeeking,
-					   NULL_CHN);
+					   NULL_CHN); // oid에 해당하는 레코드를 recdes에 할당. ispeeking이 true면 forward_recdes 데이터 할당
 	  scan_cache->cache_last_fix_page = cache_last_fix_page_save;
 	}
 
@@ -8158,10 +8164,10 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 	   * Make sure that the found object is an instance of the desired
 	   * class. If it isn't then continue looking.
 	   */
-	  if (class_oid == NULL || OID_ISNULL (class_oid) || !OID_IS_ROOTOID (&oid))
+	  if (class_oid == NULL || OID_ISNULL (class_oid) || !OID_IS_ROOTOID (&oid)) // class_oid가 null이거나, 찾은 oid가 root_oid라면
 	    {
 	      /* stop */
-	      *next_oid = oid;
+	      *next_oid = oid; // 인자로 전달된 next_oid를 현재 찾은 oid로 할당
 	      break;
 	    }
 	  else
@@ -8197,7 +8203,7 @@ heap_next_internal (THREAD_ENTRY * thread_p, const HFID * hfid, OID * class_oid,
 
   if (scan_cache->page_watcher.pgptr != NULL && scan_cache->cache_last_fix_page == false)
     {
-      pgbuf_ordered_unfix (thread_p, &scan_cache->page_watcher);
+      pgbuf_ordered_unfix (thread_p, &scan_cache->page_watcher); // unfix 작업
     }
 
   return scan;
@@ -9412,7 +9418,7 @@ exit_on_error:
 */
 SCAN_CODE
 heap_get_class_oid (THREAD_ENTRY * thread_p, const OID * oid, OID * class_oid)
-{
+{ // 전달된 oid의 페이지를 fix하고, fix된 페이지의 class_oid를 인자값 class_oid에 할당함
   PGBUF_WATCHER page_watcher;
   int err;
 
@@ -9421,7 +9427,7 @@ heap_get_class_oid (THREAD_ENTRY * thread_p, const OID * oid, OID * class_oid)
   assert (oid != NULL && !OID_ISNULL (oid) && class_oid != NULL);
   OID_SET_NULL (class_oid);
 
-  err = heap_prepare_object_page (thread_p, oid, &page_watcher, PGBUF_LATCH_READ);
+  err = heap_prepare_object_page (thread_p, oid, &page_watcher, PGBUF_LATCH_READ); // read모드로 oid fix
   if (err != NO_ERROR)
     {
       /* for non existent object, return S_DOESNT_EXIST and let the caller handle the case; */
@@ -9429,7 +9435,7 @@ heap_get_class_oid (THREAD_ENTRY * thread_p, const OID * oid, OID * class_oid)
     }
 
   /* Get class OID from HEAP_CHAIN. */
-  if (heap_get_class_oid_from_page (thread_p, page_watcher.pgptr, class_oid) != NO_ERROR)
+  if (heap_get_class_oid_from_page (thread_p, page_watcher.pgptr, class_oid) != NO_ERROR) // fix된 page의 주소값으로 class_oid 얻어냄
     {
       /* Unexpected. */
       assert_release (false);
@@ -9479,23 +9485,23 @@ heap_get_class_name (THREAD_ENTRY * thread_p, const OID * class_oid, char **clas
 int
 heap_get_class_name_alloc_if_diff (THREAD_ENTRY * thread_p, const OID * class_oid, char *guess_classname,
 				   char **classname_out)
-{
+{ // 인자로 주어진 guess_classname와 class_oid의 classname이 다를 경우 class_oid의 classname으로 할당해서 반환. 동일하면 그냥 반환
   char *classname = NULL;
   RECDES recdes;
   HEAP_SCANCACHE scan_cache;
   int error_code = NO_ERROR;
 
-  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // root_hfid 찾아서 scancache에 설정하고 나머지 값들은 초기화
+  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // root_hfid 찾아서 scancache에 S_LOCK으로 설정하고 나머지 값들은 초기화
 
-  if (heap_get_class_record (thread_p, class_oid, &recdes, &scan_cache, PEEK) == S_SUCCESS) // 여기서 얻어진 recdes로 아래에서 classname 찾음
+  if (heap_get_class_record (thread_p, class_oid, &recdes, &scan_cache, PEEK) == S_SUCCESS) // class_oid를 넘겨서 recdes에 class 정보 할당
     {
-      classname = or_class_name (&recdes);
-      if (guess_classname == NULL || strcmp (guess_classname, classname) != 0)
+      classname = or_class_name (&recdes); // 위에서 얻은 class 정보로 recdes로 classname 찾기
+      if (guess_classname == NULL || strcmp (guess_classname, classname) != 0) // classname이 예상했던 classname과 다를 때
 	{
 	  /*
 	   * The names are different.. return a copy that must be freed.
 	   */
-	  *classname_out = strdup (classname);
+	  *classname_out = strdup (classname); // classname 값 복사해서 주소 반환
 	  if (*classname_out == NULL)
 	    {
 	      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1,
@@ -9508,14 +9514,14 @@ heap_get_class_name_alloc_if_diff (THREAD_ENTRY * thread_p, const OID * class_oi
 	  /*
 	   * The classnames are identical
 	   */
-	  *classname_out = guess_classname;
+	  *classname_out = guess_classname; // recdes를 얻어와서 classname을 찾았는데 예상했던 classname과 같을 때 그대로 반환해줌
 	}
     }
   else
     {
-      ASSERT_ERROR_AND_SET (error_code);
+      ASSERT_ERROR_AND_SET (error_code); // 위 heap_get_class_record()에서 recdes를 반환받지 못했을 때
       *classname_out = NULL;
-      if (error_code == ER_HEAP_NODATA_NEWADDRESS)
+      if (error_code == ER_HEAP_NODATA_NEWADDRESS) // ER_HEAP_NODATA_NEWADDRESS라서 recdes를 찾지 못한거면 error clear해서 리턴
 	{
 	  /* clear ER_HEAP_NODATA_NEWADDRESS */
 	  er_clear ();
@@ -9523,7 +9529,7 @@ heap_get_class_name_alloc_if_diff (THREAD_ENTRY * thread_p, const OID * class_oi
 	}
     }
 
-  heap_scancache_end (thread_p, &scan_cache);
+  heap_scancache_end (thread_p, &scan_cache); // scancache 반환
 
   return error_code;
 }
@@ -9555,7 +9561,8 @@ heap_get_class_name_alloc_if_diff (THREAD_ENTRY * thread_p, const OID * class_oi
 int
 heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int requested_num_attrs, const ATTR_ID * attrids,
 		     HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info의 class_repr, value 모두 설정해서 반환
+// 1. classrepr 획득, 2. requested_num_attrs 개수만큼 attrvalue alloc, 3. attr_recache
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   bool getall;			/* Want all attribute values */
   int i = 0;
@@ -9572,9 +9579,9 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
       return NO_ERROR;
     }
 
-  if (requested_num_attrs < 0)
+  if (requested_num_attrs < 0) // 인자값 requested_num_attrs이 0보다 작으면 getall = true. requested_num_attrs는 필요한 attr 개수 같음
     {
-      getall = true;
+      getall = true; // 어떤 operation이든 처음에 attr 설정할 때 이 조건에 해당하는 것 같음
     }
   else
     {
@@ -9586,11 +9593,11 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    *
    */
 
-  attr_info->class_oid = *class_oid;
-  attr_info->last_cacheindex = -1;
+  attr_info->class_oid = *class_oid; // 인자값 class_oid를 attr_info에 할당
+  attr_info->last_cacheindex = -1; // cacheindex는 모두 초기화
   attr_info->read_cacheindex = -1;
 
-  attr_info->last_classrepr = NULL;
+  attr_info->last_classrepr = NULL; // classrepr도 초기화
   attr_info->read_classrepr = NULL;
 
   OID_SET_NULL (&attr_info->inst_oid);
@@ -9606,8 +9613,8 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    */
 
   attr_info->last_classrepr =
-    heap_classrepr_get (thread_p, &attr_info->class_oid, NULL, NULL_REPRID, &attr_info->last_cacheindex);
-  if (attr_info->last_classrepr == NULL)
+    heap_classrepr_get (thread_p, &attr_info->class_oid, NULL, NULL_REPRID, &attr_info->last_cacheindex); // class_oid에 해당하는 repr 얻어옴
+  if (attr_info->last_classrepr == NULL)                                     // attr_info->last_cacheindex도 얻어옴
     {
       goto exit_on_error;
     }
@@ -9617,7 +9624,7 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    * representation.
    */
 
-  if (requested_num_attrs < 0)
+  if (requested_num_attrs < 0) // requested_num_attrs가 0보다 작으면 last_repr에서 전체를 얻어온다는 것 같음
     {
       requested_num_attrs = attr_info->last_classrepr->n_attributes;
     }
@@ -9651,7 +9658,7 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
     {
       attr_info->values =
 	(HEAP_ATTRVALUE *) db_private_alloc (thread_p, requested_num_attrs * sizeof (*(attr_info->values)));
-      if (attr_info->values == NULL)
+      if (attr_info->values == NULL)          // HEAP_ATTRVALUE 사이즈 * num_attr만큼 alloc
 	{
 	  goto exit_on_error;
 	}
@@ -9661,7 +9668,7 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
       attr_info->values = NULL;
     }
 
-  attr_info->num_values = requested_num_attrs;
+  attr_info->num_values = requested_num_attrs; // attr_info의 num_values에도 값 할당
 
   /*
    * Set the attribute identifier of the desired attributes in the value
@@ -9669,21 +9676,21 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    * unitialized. That is, it has not been read, set or whatever.
    */
 
-  for (i = 0; i < attr_info->num_values; i++)
+  for (i = 0; i < attr_info->num_values; i++) // attr values를 순회하면서 아직 초기화되지도 않았고, 설정되거나 읽지도 않은 상태임을 표시
     {
       value = &attr_info->values[i];
       if (getall == true)
 	{
-	  value->attrid = -1;
+	  value->attrid = -1; // attrid -1로 설정
 	}
       else
 	{
 	  value->attrid = *attrids++;
 	}
-      value->state = HEAP_UNINIT_ATTRVALUE;
-      value->do_increment = 0;
-      value->last_attrepr = NULL;
-      value->read_attrepr = NULL;
+      value->state = HEAP_UNINIT_ATTRVALUE; // state 설정
+      value->do_increment = 0; // 이건 무슨 필드인지 모르겠음
+      value->last_attrepr = NULL; // repr도 null 설정
+      value->read_attrepr = NULL; // repr도 null 설정
     }
 
   /*
@@ -9691,7 +9698,7 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    * value. Needed for WRITE and Default values
    */
 
-  if (heap_attrinfo_recache_attrepr (attr_info, true) != NO_ERROR)
+  if (heap_attrinfo_recache_attrepr (attr_info, true) != NO_ERROR) // 위에서 설정한 attrinfo의 value들 초기값 세팅해줌 attrid 등등..
     {
       goto exit_on_error;
     }
@@ -9723,7 +9730,7 @@ exit_on_error:
 
 static int
 heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_reset)
-{
+{ // attr_values 순회하면서 value 값 설정해줌(attrid, attr_type, laste_repr). state가 아직 초기화되어 있지 않았다면 value init까지 해줌
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   int num_found_attrs;		/* Num of found attributes */
   int srch_num_attrs;		/* Num of attributes that can be searched */
@@ -9736,7 +9743,7 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
   /*
    * Initialize the value domain for dbvalues of all desired attributes
    */
-  if (islast_reset == true)
+  if (islast_reset == true) // islast_reset은 last_classrepr을 수정할지 말지를 뜻하는 것 같음
     {
       srch_num_attrs = attr_info->last_classrepr->n_attributes;
     }
@@ -9748,8 +9755,8 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
   /* shared and class attributes must always use the latest representation */
   srch_num_shared = attr_info->last_classrepr->n_shared_attrs;
   srch_num_class = attr_info->last_classrepr->n_class_attrs;
-
-  for (num_found_attrs = 0, curr_attr = 0; curr_attr < attr_info->num_values; curr_attr++)
+// 왜 업데이트 시에 column 개수^2만큼 반복할까? 중간에 (value->attrid == search_attrepr->id)에 해당하지 않는 경우는 뭘까?
+  for (num_found_attrs = 0, curr_attr = 0; curr_attr < attr_info->num_values; curr_attr++) // column 개수만큼
     {
       /*
        * Go over the list of attributes (instance, shared, and class attrs)
@@ -9757,19 +9764,19 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
        */
       if (islast_reset == true)
 	{
-	  search_attrepr = attr_info->last_classrepr->attributes;
+	  search_attrepr = attr_info->last_classrepr->attributes; // 마지막으로 저장된 attribute 정보
 	}
       else
 	{
 	  search_attrepr = attr_info->read_classrepr->attributes;
 	}
 
-      value = &attr_info->values[curr_attr];
+      value = &attr_info->values[curr_attr]; // temp용 value 변수에 현재 보고 있는 value 정보 담기
 
-      if (value->attrid == -1)
+      if (value->attrid == -1) // value->attrid이 -1이면 초기화 상태
 	{
 	  /* Case that we want all attributes */
-	  value->attrid = search_attrepr[curr_attr].id;
+	  value->attrid = search_attrepr[curr_attr].id; // -1이면 초기화된 상태이므로, 현재 가리키고 있는 repr.id로 할당
 	}
       else if (IS_DEDUPLICATE_KEY_ATTR_ID (value->attrid))
 	{
@@ -9792,21 +9799,21 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
 	  continue;
 	}
 
-      for (i = 0; i < srch_num_attrs; i++, search_attrepr++)
-	{
+      for (i = 0; i < srch_num_attrs; i++, search_attrepr++) // column 개수만큼 반복하면서 접근하려는 attrid를 찾아냄(두 개의 column 중 하나를 수정하려 한다면 그 하나를 찾아낸다고 보면 됨)
+	{ // ??????????????????????????????????????????????
 	  /*
 	   * Is this a desired instance attribute?
 	   */
-	  if (value->attrid == search_attrepr->id)
+	  if (value->attrid == search_attrepr->id) // value->attrid가 -1이어서 위에서 할당된 경우
 	    {
 	      /*
 	       * Found it.
 	       * Initialize the attribute value information
 	       */
-	      value->attr_type = HEAP_INSTANCE_ATTR;
+	      value->attr_type = HEAP_INSTANCE_ATTR; // value의 attr_type을 HEAP_INSTANCE_ATTR로 설정
 	      if (islast_reset == true)
 		{
-		  value->last_attrepr = search_attrepr;
+		  value->last_attrepr = search_attrepr; // 마지막으로 찾은 attribute 정보로 저장
 		  /*
 		   * The server does not work with DB_TYPE_OBJECT but DB_TYPE_OID
 		   */
@@ -9816,7 +9823,7 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
 		    }
 
 		  if (value->state == HEAP_UNINIT_ATTRVALUE)
-		    {
+		    { // value의 상태가 HEAP_UNINIT_ATTRVALUE이면 init 진행해줌
 		      db_value_domain_init (&value->dbvalue, value->last_attrepr->type,
 					    value->last_attrepr->domain->precision, value->last_attrepr->domain->scale);
 		    }
@@ -9833,12 +9840,12 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
 		    }
 		}
 
-	      num_found_attrs++;
+	      num_found_attrs++; // 찾은 attr 개수 증가
 	      break;
 	    }
 	}
 
-      if (i < srch_num_attrs)
+      if (i < srch_num_attrs) // 찾으려는 attr의 개수보다 적은데 여길 왔다면 이미 찾은거임. 그럼 반복문 pass
 	{			// found it.
 	  continue;
 	}
@@ -9872,7 +9879,7 @@ heap_attrinfo_recache_attrepr (HEAP_CACHE_ATTRINFO * attr_info, bool islast_rese
 
 	      if (value->state == HEAP_UNINIT_ATTRVALUE)
 		{
-		  db_value_domain_init (&value->dbvalue, value->last_attrepr->type,
+		  db_value_domain_init (&value->dbvalue, value->last_attrepr->type, // attrvalue 초기화 안 됐으면 해주는 것 같음
 					value->last_attrepr->domain->precision, value->last_attrepr->domain->scale);
 		}
 	      num_found_attrs++;
@@ -9958,7 +9965,7 @@ exit_on_error:
  */
 static int
 heap_attrinfo_recache (THREAD_ENTRY * thread_p, REPR_ID reprid, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // 인자로 전달된 reprid 버전에 맞게 attr_info 구조체의 속성들이 가리키고 있는 포인터들을 바꿔줌. read_classrepr이 비었을 때도 호출되어 last_classrepr로 바꿔줌
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   int i;
   int ret = NO_ERROR;
@@ -9982,15 +9989,15 @@ heap_attrinfo_recache (THREAD_ENTRY * thread_p, REPR_ID reprid, HEAP_CACHE_ATTRI
 	{
 	  heap_classrepr_free_and_init (attr_info->read_classrepr, &attr_info->read_cacheindex);
 	}
-      attr_info->read_classrepr = NULL;
+      attr_info->read_classrepr = NULL; // 현재 버저의 classrepr NULL로 초기화
     }
 
   if (reprid == NULL_REPRID)
     {
-      return NO_ERROR;
+      return NO_ERROR; // NULL_REPRID로 초기화하기 위해 이 함수를 불렀다면 read_classrepr만 NULL로 초기화해주고 함수 종료
     }
 
-  if (reprid == attr_info->last_classrepr->id) // attr_info->last_classrepr가 뭔지 모르겠음
+  if (reprid == attr_info->last_classrepr->id) // reprid가 최근에 캐싱한 repr과 같다면
     {
       /*
        * Take a short cut
@@ -10000,10 +10007,10 @@ heap_attrinfo_recache (THREAD_ENTRY * thread_p, REPR_ID reprid, HEAP_CACHE_ATTRI
 	  for (i = 0; i < attr_info->num_values; i++)
 	    {
 	      value = &attr_info->values[i]; // attr_info->values에 있는 정보 가져옴
-	      value->read_attrepr = value->last_attrepr; // read_attrepr/last_attrepr 뭔지 이해 안 됨
+	      value->read_attrepr = value->last_attrepr; // 마지막으로 캐싱한 attr_repr을 read_repr에 저장
 	    }
 	}
-      attr_info->read_classrepr = attr_info->last_classrepr;
+      attr_info->read_classrepr = attr_info->last_classrepr; // 최신 캐싱 repr 정보 read_repr에 저장
       attr_info->read_cacheindex = -1;	/* Don't need to free this one */ // classrepr에서 값을 얻어온게 아니면 1. 뭔지 모르겠음
       return NO_ERROR;
     }
@@ -10050,7 +10057,7 @@ exit_on_error:
  */
 void
 heap_attrinfo_end (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info를 싹다 초기화
   int ret = NO_ERROR;
 
   /* check to make sure the attr_info has been used */
@@ -10062,12 +10069,12 @@ heap_attrinfo_end (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * attr_info)
   /*
    * Free any attribute and class representation information
    */
-  ret = heap_attrinfo_clear_dbvalues (attr_info);
-  ret = heap_attrinfo_recache (thread_p, NULL_REPRID, attr_info);
+  ret = heap_attrinfo_clear_dbvalues (attr_info); // attr_info 돌면서 value들 HEAP_UNINIT_ATTRVALUE로 초기화
+  ret = heap_attrinfo_recache (thread_p, NULL_REPRID, attr_info); // attr_info->read_classrepr을 NULL로 초기화
 
   if (attr_info->last_classrepr != NULL)
     {
-      heap_classrepr_free_and_init (attr_info->last_classrepr, &attr_info->last_cacheindex);
+      heap_classrepr_free_and_init (attr_info->last_classrepr, &attr_info->last_cacheindex); // attr_info의 last_classrepr도 초기화
     }
 
   if (attr_info->values)
@@ -10093,7 +10100,7 @@ heap_attrinfo_end (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * attr_info)
  */
 int
 heap_attrinfo_clear_dbvalues (HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info->value 필드값들 초기화(db_value, state->HEAP_UNINIT_ATTRVALUE), attr_info도 null로 초기화(inst_oid, inst_chn)
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   OR_ATTRIBUTE *attrepr;	/* Which one current repr of default one */
   int i;
@@ -10106,10 +10113,10 @@ heap_attrinfo_clear_dbvalues (HEAP_CACHE_ATTRINFO * attr_info)
     }
 
   if (attr_info->values != NULL)
-    {
-      for (i = 0; i < attr_info->num_values; i++)
+    { // attr의 values를 순회하면서 작업
+      for (i = 0; i < attr_info->num_values; i++) // attr 개수만큼 순회
 	{
-	  value = &attr_info->values[i];
+	  value = &attr_info->values[i]; // attr_info->values를 하나씩 순회
 	  if (value->state != HEAP_UNINIT_ATTRVALUE)
 	    {
 	      /*
@@ -10117,13 +10124,13 @@ heap_attrinfo_clear_dbvalues (HEAP_CACHE_ATTRINFO * attr_info)
 	       * of the object
 	       */
 	      attrepr = ((value->read_attrepr != NULL) ? value->read_attrepr : value->last_attrepr);
-	      if (attrepr != NULL)
+	      if (attrepr != NULL) // value->repr이 존재하면 이미 db_value를 누군가가 채웠다는 뜻
 		{
-		  if (pr_clear_value (&value->dbvalue) != NO_ERROR)
+		  if (pr_clear_value (&value->dbvalue) != NO_ERROR) // db_value 초기화
 		    {
 		      ret = ER_FAILED;
 		    }
-		  value->state = HEAP_UNINIT_ATTRVALUE;
+		  value->state = HEAP_UNINIT_ATTRVALUE; // state를 HEAP_UNINIT_ATTRVALUE로 해주는게 clear임
 		}
 	    }
 	}
@@ -10146,7 +10153,7 @@ heap_attrinfo_clear_dbvalues (HEAP_CACHE_ATTRINFO * attr_info)
  */
 static int
 heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // 전달된 value를 초기화해서 disk에 있는 데이터를 value->dbvalue에 적재함
   OR_BUF buf;
   PR_TYPE *pr_type;		/* Primitive type array function structure */
   OR_ATTRIBUTE *volatile attrepr;
@@ -10212,7 +10219,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
 	    }
 	}
       else
-	{
+	{ // 가변 길이의 데이터라면
 	  /*
 	   * A variable attribute
 	   */
@@ -10287,7 +10294,7 @@ heap_attrvalue_read (RECDES * recdes, HEAP_ATTRVALUE * value, HEAP_CACHE_ATTRINF
 	  pr_type = pr_type_from_id (attrepr->type);
 	  if (pr_type)
 	    {
-	      pr_type->data_readval (&buf, &value->dbvalue, attrepr->domain, disk_length, false, NULL, 0);
+	      pr_type->data_readval (&buf, &value->dbvalue, attrepr->domain, disk_length, false, NULL, 0); // value의 dbvalue에 disk_data 할당해주는 것 같음
 	    }
 	  value->state = HEAP_READ_ATTRVALUE;
 	  break;
@@ -10416,7 +10423,7 @@ heap_midxkey_get_value (RECDES * recdes, OR_ATTRIBUTE * att, DB_VALUE * value, H
 int
 heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECDES * recdes,
 			     HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info에 저장된 속성값(repr)에 따라 record를 읽어서 value를 채워넣음
   int i;
   REPR_ID reprid;		/* The disk representation of the object */
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
@@ -10434,12 +10441,12 @@ heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECD
 
   if (inst_oid != NULL && recdes != NULL && recdes->data != NULL)
     {
-      reprid = or_rep_id (recdes);
+      reprid = or_rep_id (recdes); // record 마다의 repr_id가 있는데 그걸 받아옴
 
       if (attr_info->read_classrepr == NULL || attr_info->read_classrepr->id != reprid) // 전달된 attr_info->read_classrepr가 null이라면
 	{
 	  /* Get the needed representation */
-	  ret = heap_attrinfo_recache (thread_p, reprid, attr_info); // attr_info->read_classrepr의 값을 얻어옴. 뭘 한건지는 모르겠음
+	  ret = heap_attrinfo_recache (thread_p, reprid, attr_info); // attr/class_repr->read_repr에 값을 얻어옴
 	  if (ret != NO_ERROR)
 	    {
 	      goto exit_on_error;
@@ -10453,7 +10460,7 @@ heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECD
 
   for (i = 0; i < attr_info->num_values; i++)
     {
-      value = &attr_info->values[i];
+      value = &attr_info->values[i]; // attr_info->value 순회
       ret = heap_attrvalue_read (recdes, value, attr_info); // value->dbvalue에 저장
       if (ret != NO_ERROR)
 	{
@@ -10466,8 +10473,8 @@ heap_attrinfo_read_dbvalues (THREAD_ENTRY * thread_p, const OID * inst_oid, RECD
    */
   if (inst_oid != NULL && recdes != NULL && recdes->data != NULL)
     {
-      attr_info->inst_chn = or_chn (recdes);
-      attr_info->inst_oid = *inst_oid;
+      attr_info->inst_chn = or_chn (recdes); // inst_chn이 뭔지 모르겠음
+      attr_info->inst_oid = *inst_oid; // attr_info에 현재 읽어낸 inst_oid 삽입
     }
 
   return ret;
@@ -10668,13 +10675,13 @@ heap_attrinfo_dump (THREAD_ENTRY * thread_p, FILE * fp, HEAP_CACHE_ATTRINFO * at
  */
 HEAP_ATTRVALUE *
 heap_attrvalue_locate (ATTR_ID attrid, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info에서 컬럼 attrid에 맞는 value 찾아줌
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   int i;
 
   for (i = 0, value = attr_info->values; i < attr_info->num_values; i++, value++)
     {
-      if (attrid == value->attrid)
+      if (attrid == value->attrid) // attr_info 순회하면서 인자값 attrid와 같은 ATTRVALUE값 반환
 	{
 	  return value;
 	}
@@ -10752,7 +10759,7 @@ heap_attrinfo_access (ATTR_ID attrid, HEAP_CACHE_ATTRINFO * attr_info)
       return NULL;
     }
 
-  value = heap_attrvalue_locate (attrid, attr_info);
+  value = heap_attrvalue_locate (attrid, attr_info); // attr_info 순회하면서 attrid와 같은 HEAP_ATTRVALUE 값 찾기
   if (value == NULL || value->state == HEAP_UNINIT_ATTRVALUE)
     {
       er_log_debug (ARG_FILE_LINE, "heap_attrinfo_access: Unknown attrid = %d", attrid);
@@ -11257,15 +11264,15 @@ heap_get_class_supers (THREAD_ENTRY * thread_p, const OID * class_oid, OID ** su
  */
 static int
 heap_attrinfo_check (const OID * inst_oid, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // 인자값 inst_oid와 attr_info->inst_oid와 같은지 체크. null이라면 null로 설정되어 있는지 체크
   int ret = NO_ERROR;
 
-  if (inst_oid != NULL)
+  if (inst_oid != NULL) // inst_oid가 null이 아니면
     {
       /*
        * The OIDs must be equal
        */
-      if (!OID_EQ (&attr_info->inst_oid, inst_oid))
+      if (!OID_EQ (&attr_info->inst_oid, inst_oid)) // attr_info의 inst_oid와 다르다면
 	{
 	  if (!OID_ISNULL (&attr_info->inst_oid))
 	    {
@@ -11276,7 +11283,7 @@ heap_attrinfo_check (const OID * inst_oid, HEAP_CACHE_ATTRINFO * attr_info)
 	      goto exit_on_error;
 	    }
 
-	  attr_info->inst_oid = *inst_oid;
+	  attr_info->inst_oid = *inst_oid; // inst_oid를 attr_info에 할당해줌
 	}
     }
   else
@@ -11310,7 +11317,8 @@ exit_on_error:
  */
 int
 heap_attrinfo_set (const OID * inst_oid, ATTR_ID attrid, DB_VALUE * attr_val, HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info에서 attrid에 해당하는 attr_value 찾아서 attr_val를 db_value에 할당해줌.
+  // value->state도 write로 바꿈
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
   PR_TYPE *pr_type;		/* Primitive type array function structure */
   TP_DOMAIN_STATUS dom_status;
@@ -11325,13 +11333,13 @@ heap_attrinfo_set (const OID * inst_oid, ATTR_ID attrid, DB_VALUE * attr_val, HE
       return ER_FAILED;
     }
 
-  ret = heap_attrinfo_check (inst_oid, attr_info);
+  ret = heap_attrinfo_check (inst_oid, attr_info); // inst_oid와 attr_info->inst_oid가 같은지 체크. null이 아닌데 다르면 attr_info에 inst_oid 할당
   if (ret != NO_ERROR)
     {
       goto exit_on_error;
     }
 
-  value = heap_attrvalue_locate (attrid, attr_info);
+  value = heap_attrvalue_locate (attrid, attr_info); // attrid에 해당하는 attrvalue를 attr_info에서 찾아서 반환
   if (value == NULL)
     {
       goto exit_on_error;
@@ -11421,7 +11429,7 @@ exit_on_error:
 static int
 heap_attrinfo_set_uninitialized (THREAD_ENTRY * thread_p, OID * inst_oid, RECDES * recdes,
 				 HEAP_CACHE_ATTRINFO * attr_info)
-{
+{ // attr_info의 value들 중 uninit인 state를 write 같은 상태로 변경
   int i;
   REPR_ID reprid;		/* Representation of object */
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
@@ -11465,13 +11473,13 @@ heap_attrinfo_set_uninitialized (THREAD_ENTRY * thread_p, OID * inst_oid, RECDES
       value = &attr_info->values[i];
       if (value->state == HEAP_UNINIT_ATTRVALUE)
 	{
-	  ret = heap_attrvalue_read (recdes, value, attr_info);
+	  ret = heap_attrvalue_read (recdes, value, attr_info); // uninit 상태면 disk에서 value를 읽어옴
 	  if (ret != NO_ERROR)
 	    {
 	      goto exit_on_error;
 	    }
 	}
-      else if (value->state == HEAP_WRITTEN_ATTRVALUE
+      else if (value->state == HEAP_WRITTEN_ATTRVALUE // clob이나 blob 쓸 때 사용됨. 일반적으로는 사용되기 어려워보임
 	       && (value->last_attrepr->type == DB_TYPE_BLOB || value->last_attrepr->type == DB_TYPE_CLOB))
 	{
 	  DB_VALUE *save;
@@ -11537,11 +11545,11 @@ exit_on_error:
  */
 static int
 heap_attrinfo_get_disksize (HEAP_CACHE_ATTRINFO * attr_info, bool is_mvcc_class, int *offset_size_ptr)
-{
+{ // 다른 모듈을 호출해서 attr_info value들의 예상 size 반환
   int i, size;
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
 
-  *offset_size_ptr = OR_BYTE_SIZE;
+  *offset_size_ptr = OR_BYTE_SIZE; // 예상 size 크기에 따라 1 ~ 4로 설정
 
 re_check:
   size = 0;
@@ -11549,19 +11557,19 @@ re_check:
     {
       value = &attr_info->values[i];
 
-      if (value->last_attrepr->is_fixed != 0)
+      if (value->last_attrepr->is_fixed != 0) // 고정길이 value라면
 	{
 	  size += tp_domain_disk_size (value->last_attrepr->domain);
 	}
-      else
+      else // 가변 길이 value라면
 	{
 	  size += pr_data_writeval_disk_size (&value->dbvalue);
 	}
     }
 
-  if (is_mvcc_class)
+  if (is_mvcc_class) // mvcc 수행해야 한다면
     {
-      size += OR_MVCC_INSERT_HEADER_SIZE;
+      size += OR_MVCC_INSERT_HEADER_SIZE; // 예상 사이즈에 mvcc header size 추가
     }
   else
     {
@@ -11569,7 +11577,7 @@ re_check:
     }
 
   size += OR_VAR_TABLE_SIZE_INTERNAL (attr_info->last_classrepr->n_variable, *offset_size_ptr);
-  size += OR_BOUND_BIT_BYTES (attr_info->last_classrepr->n_attributes - attr_info->last_classrepr->n_variable);
+  size += OR_BOUND_BIT_BYTES (attr_info->last_classrepr->n_attributes - attr_info->last_classrepr->n_variable); // 4바이트 추가
 
   if (*offset_size_ptr == OR_BYTE_SIZE && size > OR_MAX_BYTE)
     {
@@ -11641,7 +11649,7 @@ heap_attrinfo_transform_to_disk_except_lob (THREAD_ENTRY * thread_p, HEAP_CACHE_
 static SCAN_CODE
 heap_attrinfo_transform_to_disk_internal (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * attr_info, RECDES * old_recdes,
 					  record_descriptor * new_recdes, int lob_create_flag)
-{
+{ // disk에 넣을 수 있는 포맷을 만들어서 new_recdes에 저장하고 반환
   OR_BUF orep, *buf;
   char *ptr_bound, *ptr_varvals;
   HEAP_ATTRVALUE *value;	/* Disk value Attr info for a particular attr */
@@ -11681,12 +11689,12 @@ heap_attrinfo_transform_to_disk_internal (THREAD_ENTRY * thread_p, HEAP_CACHE_AT
   is_mvcc_class = !mvcc_is_mvcc_disabled_class (&(attr_info->class_oid));
 
   expected_size = heap_attrinfo_get_disksize (attr_info, is_mvcc_class, &tmp);
-  offset_size = tmp;
+  offset_size = tmp;                     // attr_info의 value들 전체 예상 size 반환
 
   if (is_mvcc_class)
-    {
+    { // mvcc는 연산(insert, update)에 따라 필요한 헤더 크기가 다르기 때문에 그에 맞춰 mvcc 예약 공간을 저장해둠
       mvcc_wasted_space = (OR_MVCC_MAX_HEADER_SIZE - OR_MVCC_INSERT_HEADER_SIZE);
-      if (old_recdes != NULL)
+      if (old_recdes != NULL) // old_recdes가 null이 아니면 update 과정에서 호출됐다는 뜻 같음
 	{
 	  /* Update case, reserve space for previous version LSA. */
 	  expected_size += OR_MVCC_PREV_VERSION_LSA_SIZE;
@@ -11695,11 +11703,11 @@ heap_attrinfo_transform_to_disk_internal (THREAD_ENTRY * thread_p, HEAP_CACHE_AT
     }
 
   /* reserve enough space if need to add additional MVCC header info */
-  expected_size += mvcc_wasted_space;
+  expected_size += mvcc_wasted_space; // 예상 size에 mvcc 크기만큰 추가
 
 resize_and_start:
 
-  new_recdes->resize_buffer (expected_size);
+  new_recdes->resize_buffer (expected_size); // 예상 size로 포맷 변경
   or_init (&orep, new_recdes->get_data_for_modify (), (int) expected_size);
   orep.error_abort = 1;
   buf = &orep;
@@ -11717,30 +11725,30 @@ resize_and_start:
       repid_bits = attr_info->last_classrepr->id;
       /*
        * Do we have fixed value attributes ?
-       */
+       */                               // column 개수 - 가변 길이 column 개수
       if ((attr_info->last_classrepr->n_attributes - attr_info->last_classrepr->n_variable) != 0)
-	{
-	  repid_bits |= OR_BOUND_BIT_FLAG;
+	{ // attr_info에 고정 길이 value가 있다면
+	  repid_bits |= OR_BOUND_BIT_FLAG; // 고정길이 비트 설정
 	}
 
       /* offset size */
-      OR_SET_VAR_OFFSET_SIZE (repid_bits, offset_size);
+      OR_SET_VAR_OFFSET_SIZE (repid_bits, offset_size); // 가변 길이에 따라 뭘 설정해주는듯
 
       /*
        * We must increase the current value by one so that clients
        * can detect the change in object. That is, clients will need to
        * refetch the object.
        */
-      attr_info->inst_chn++;
+      attr_info->inst_chn++; // client와의 싱크를 맞추기 위해 chn 증가
       if (is_mvcc_class)
 	{
-	  if (old_recdes == NULL)
+	  if (old_recdes == NULL) // old_recdes가 null이면 insert를 위해 호출된 것
 	    {
 	      repid_bits |= (OR_MVCC_FLAG_VALID_INSID << OR_MVCC_FLAG_SHIFT_BITS);
 	      or_put_int (buf, repid_bits);
 	      or_put_int (buf, 0);	/* CHN */
 	      or_put_bigint (buf, 0);	/* MVCC insert id */
-	      header_size = OR_MVCC_INSERT_HEADER_SIZE;
+	      header_size = OR_MVCC_INSERT_HEADER_SIZE; // header size 조정
 	    }
 	  else
 	    {
@@ -11792,7 +11800,7 @@ resize_and_start:
 	{
 	  value = &attr_info->values[i];
 	  dbvalue = &value->dbvalue;
-	  pr_type = value->last_attrepr->domain->type;
+	  pr_type = value->last_attrepr->domain->type; // value의 type 반환
 	  if (pr_type == NULL)
 	    {
 	      return S_ERROR;
@@ -11801,7 +11809,7 @@ resize_and_start:
 	  /*
 	   * Is this a fixed or variable attribute ?
 	   */
-	  if (value->last_attrepr->is_fixed != 0)
+	  if (value->last_attrepr->is_fixed != 0) // 고정길이라면 
 	    {
 	      /*
 	       * Fixed attribute
@@ -11938,7 +11946,7 @@ resize_and_start:
 	    }
 	}
 
-      if (attr_info->last_classrepr->n_variable > 0)
+      if (attr_info->last_classrepr->n_variable > 0) // 가변 길이 value가 존재한다면
 	{
 	  /*
 	   * The last element of the variable offset table points to the end of
@@ -12094,14 +12102,14 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
   attr_info->num_values = -1;	/* initialize attr_info */
 
   classrepr = heap_classrepr_get (thread_p, class_oid, class_recdes, NULL_REPRID, &classrepr_cacheindex);
-  if (classrepr == NULL)
+  if (classrepr == NULL)                                                 // reprid를 NULL_REPRID로 줬기 때문에 attrinfo의 last_repr 반환
     {
       return ER_FAILED;
     }
 
-  if (classrepr->n_attributes > HEAP_GUESS_NUM_INDEXED_ATTRS)
+  if (classrepr->n_attributes > HEAP_GUESS_NUM_INDEXED_ATTRS) // attribute 수가 100개보다 많다면
     {
-      set_attrids = (ATTR_ID *) malloc (classrepr->n_attributes * sizeof (ATTR_ID));
+      set_attrids = (ATTR_ID *) malloc (classrepr->n_attributes * sizeof (ATTR_ID)); // 그만큼 할당
       if (set_attrids == NULL)
 	{
 	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1,
@@ -12112,7 +12120,7 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
     }
   else
     {
-      set_attrids = guess_attrids;
+      set_attrids = guess_attrids; // 100개짜리 배열로 할당
     }
 
   /*
@@ -12122,7 +12130,7 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
 
   for (j = 0; j < *num_btids; j++)
     {
-      indexp = &classrepr->indexes[j];
+      indexp = &classrepr->indexes[j]; // OR_CLASSREPR 내용이라 모르겠음
 
       // We cannot make a PK with a function. Therefore, only the last member is checked.
       if (is_check_foreign && (indexp->n_atts > 1) && IS_DEDUPLICATE_KEY_ATTR_ID (indexp->atts[indexp->n_atts - 1]->id))
@@ -12138,9 +12146,9 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
 	}
       else
 	{
-	  if (indexp->n_atts == 1)
+	  if (indexp->n_atts == 1) // columne 개수가 1개이면
 	    {
-	      idx_info->has_single_col = true;
+	      idx_info->has_single_col = true; // single_col true 설정
 	    }
 	  else if (indexp->n_atts > 1)
 	    {
@@ -12160,9 +12168,9 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
    * are found
    */
   num_found_attrs = 0;
-  if (idx_info->has_single_col)
+  if (idx_info->has_single_col) // column 개수가 1개이면
     {
-      for (i = 0, search_attrepr = classrepr->attributes; i < classrepr->n_attributes; i++, search_attrepr++)
+      for (i = 0, search_attrepr = classrepr->attributes; i < classrepr->n_attributes; i++, search_attrepr++) // classrepr->attributes는 그냥 attribute에 대한 정보 객체라고 보자
 	{
 	  if (search_attrepr->n_btids > 0)
 	    {
@@ -12181,9 +12189,9 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
 		    }
 		  else
 		    {
-		      if (indexp->n_atts == 1 && indexp->atts[0]->id == search_attrepr->id)
+		      if (indexp->n_atts == 1 && indexp->atts[0]->id == search_attrepr->id) // 현재 조건과 같이 single column이고 현재 attribute의 정보(id)가 일치한다면
 			{
-			  set_attrids[num_found_attrs++] = search_attrepr->id;
+			  set_attrids[num_found_attrs++] = search_attrepr->id; // 반환할 set_attrids 배열에 현자 id 삽입
 			  break;
 			}
 		    }
@@ -12193,7 +12201,7 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
     }
 
   if (!idx_info->has_multi_col && num_found_attrs == 0)
-    {
+    { // 아무것도 안 하고 초기화만 진행
       /* initialize the attrinfo cache and return, there is nothing else to do */
       /* (void) memset(attr_info, '\0', sizeof (HEAP_CACHE_ATTRINFO)); */
 
@@ -12206,11 +12214,11 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
     }
   else
     {				/* num_found_attrs > 0 */
-      /* initialize attribute information */
+      /* initialize attribute information */ // 반환할 attribute 정보(attr_info)에 값 넣기 시작
       attr_info->class_oid = *class_oid;
-      attr_info->last_cacheindex = classrepr_cacheindex;
+      attr_info->last_cacheindex = classrepr_cacheindex; // 위 heap_classrepr_get()에서 찾은 repr cache의 index 할당
       attr_info->read_cacheindex = -1;
-      attr_info->last_classrepr = classrepr;
+      attr_info->last_classrepr = classrepr; // 위에서 찾은 classrepr 할당
       attr_info->read_classrepr = NULL;
       OID_SET_NULL (&attr_info->inst_oid);
       attr_info->inst_chn = NULL_CHN;
@@ -12222,7 +12230,7 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
 	}
       else
 	{
-	  attr_info->values =
+	  attr_info->values = // 그냥 메모리 할당이라고 보자. 잘 모르겠음
 	    (HEAP_ATTRVALUE *) db_private_alloc (thread_p, (num_found_attrs * sizeof (HEAP_ATTRVALUE)));
 	  if (attr_info->values == NULL)
 	    {
@@ -12238,7 +12246,7 @@ heap_attrinfo_start_with_index (THREAD_ENTRY * thread_p, OID * class_oid, RECDES
        * attribute information, and indicates that the current value is
        * unitialized. That is, it has not been read, set or whatever.
        */
-      for (i = 0; i < attr_info->num_values; i++)
+      for (i = 0; i < attr_info->num_values; i++) // attr_info값 세팅
 	{
 	  value = &attr_info->values[i];
 	  value->attrid = set_attrids[i];
@@ -13084,7 +13092,7 @@ heap_attrvalue_get_key (THREAD_ENTRY * thread_p, int btid_index, HEAP_CACHE_ATTR
    */
   if (recdes != NULL)
     {
-      reprid = or_rep_id (recdes);
+      reprid = or_rep_id (recdes); //recdes의 reprid 얻어오기
 
       if (idx_attrinfo->read_classrepr == NULL || idx_attrinfo->read_classrepr->id != reprid)
 	{
@@ -13169,7 +13177,7 @@ heap_attrvalue_get_key (THREAD_ENTRY * thread_p, int btid_index, HEAP_CACHE_ATTR
 
       ret_val = db_value;
     }
-  else
+  else // single column인 경우
     {
       /*
        *  Single-column index.  The key is simply the value of the attribute.
@@ -15627,7 +15635,7 @@ heap_chnguess_get (THREAD_ENTRY * thread_p, const OID * oid, int tran_index)
  */
 int
 heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int chn)
-{
+{ // heap_Guesschn에는 oid에 해당하는 entry가 있을 수도 있고 없을 수도 있음. 없으면 entry에 등록함
   int i;
   bool can_continue;
   HEAP_CHNGUESS_ENTRY *entry;
@@ -15642,7 +15650,7 @@ heap_chnguess_put (THREAD_ENTRY * thread_p, const OID * oid, int tran_index, int
       return NULL_CHN;
     }
 
-  if (heap_Guesschn->num_clients <= tran_index)
+  if (heap_Guesschn->num_clients <= tran_index) // 최신 버전에서 이 코드는 삭제되고, assert 문으로 대체됨
     {
       if (heap_chnguess_realloc () != NO_ERROR)
 	{
@@ -15942,7 +15950,7 @@ heap_rv_redo_insert (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
  */
 static void
 heap_mvcc_log_insert (THREAD_ENTRY * thread_p, RECDES * p_recdes, LOG_DATA_ADDR * p_addr)
-{
+{ // LOG_CRUMB타입의 redo를 위한 변수를 설정하는데 뭘 하는지 모르겠음. 그냥 mvcc log 남긴다고 보면 될듯
 #define HEAP_LOG_MVCC_INSERT_MAX_REDO_CRUMBS	    4
 
   int n_redo_crumbs = 0, data_copy_offset = 0, chn_offset;
@@ -16863,7 +16871,7 @@ heap_get_class_repr_id (THREAD_ENTRY * thread_p, OID * class_oid)
 int
 heap_set_autoincrement_value (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * attr_info, HEAP_SCANCACHE * scan_cache,
 			      int *is_set)
-{
+{ // 자동으로 증가해야 되는 column이면 자동으로 값을 증가시켜서 할당해주는듯. 해당되는 column이 없으면 그냥 패스
   int i, idx_in_cache;
   char *classname = NULL;
   char *attr_name = NULL;
@@ -16900,7 +16908,8 @@ heap_set_autoincrement_value (THREAD_ENTRY * thread_p, HEAP_CACHE_ATTRINFO * att
       att = &attr_info->last_classrepr->attributes[i];
 
       if (att->is_autoincrement && (value->state == HEAP_UNINIT_ATTRVALUE))
-	{
+	{ // attr정보를 조회했을 때 autoincrement라면(값을 넣지 않아도 자동으로 값이 증가하는 옵션이면)
+          // 해당되지 않으면 이 함수에서 아무것도 안 함
 	  OID serial_obj_oid = att->auto_increment.serial_obj.load ().oid;
 	  if (OID_ISNULL (&serial_obj_oid) || prm_get_integer_value (PRM_ID_SUPPLEMENTAL_LOG))
 	    {
@@ -17116,8 +17125,8 @@ heap_get_class_info (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfid
 {
   int error_code = NO_ERROR;
 
-  error_code = heap_hfid_cache_get (thread_p, class_oid, hfid_out, ftype_out, classname_out);
-  if (error_code != NO_ERROR)
+  error_code = heap_hfid_cache_get (thread_p, class_oid, hfid_out, ftype_out, classname_out); // hfid 얻어오기(class_oid로부터 읽어옴)
+  if (error_code != NO_ERROR)                                                                 // 다른 케이스에서는 classname도 얻어오는듯
     {
       ASSERT_ERROR_AND_SET (error_code);
       return error_code;
@@ -19236,7 +19245,7 @@ heap_get_class_oid_from_page (THREAD_ENTRY * thread_p, PAGE_PTR page_p, OID * cl
   RECDES chain_recdes;
   HEAP_CHAIN *chain;
 
-  if (spage_get_record (thread_p, page_p, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS)
+  if (spage_get_record (thread_p, page_p, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS) // page의 첫 번째 slot 반환
     {
       assert (0);
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_GENERIC_ERROR, 0);
@@ -19667,7 +19676,7 @@ heap_scancache_quick_start_root_hfid (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * 
   HFID root_hfid;
 
   (void) boot_find_root_heap (&root_hfid); // root_hfid 찾아주는듯
-  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scan_cache->node.hfid에 적용
+  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scan_cache->node.hfid에 적용. 나머지 초기화
   scan_cache->page_latch = S_LOCK; // heap_scancache_quick_start_internal()에서도 page_latch를 S_LOCK로 해줌
 
   return NO_ERROR;
@@ -19783,7 +19792,7 @@ heap_link_watchers (HEAP_OPERATION_CONTEXT * child, HEAP_OPERATION_CONTEXT * par
  */
 static void
 heap_unfix_watchers (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
-{
+{ // home, overflow, hdr, fwd 페이지 잡아놓은게 있다면 unfix
   assert (context != NULL);
 
   /* unfix pages */
@@ -19881,12 +19890,12 @@ heap_mark_class_as_modified (THREAD_ENTRY * thread_p, OID * oid_p, int chn, bool
       return NO_ERROR;
     }
 
-  if (heap_get_class_name (thread_p, oid_p, &classname) != NO_ERROR || classname == NULL)
+  if (heap_get_class_name (thread_p, oid_p, &classname) != NO_ERROR || classname == NULL) // classname 얻어오기
     {
       ASSERT_ERROR ();
       return ER_FAILED;
     }
-  if (log_add_to_modified_class_list (thread_p, classname, oid_p) != NO_ERROR)
+  if (log_add_to_modified_class_list (thread_p, classname, oid_p) != NO_ERROR) // log에 추가하는듯
     {
       free_and_init (classname);
       return ER_FAILED;
@@ -19898,7 +19907,7 @@ heap_mark_class_as_modified (THREAD_ENTRY * thread_p, OID * oid_p, int chn, bool
     {
       return ER_FAILED;
     }
-  heap_Guesschn->schema_change = true;
+  heap_Guesschn->schema_change = true; // 전역변수 heap_Guesschn에 schema 변경됐다고 표시
 
   if (decache)
     {
@@ -19906,7 +19915,7 @@ heap_mark_class_as_modified (THREAD_ENTRY * thread_p, OID * oid_p, int chn, bool
     }
   else
     {
-      (void) heap_chnguess_put (thread_p, oid_p, LOG_FIND_THREAD_TRAN_INDEX (thread_p), chn);
+      (void) heap_chnguess_put (thread_p, oid_p, LOG_FIND_THREAD_TRAN_INDEX (thread_p), chn); // 전역변수 heap_Guesschn에서 entry 가져옴
     }
 
   csect_exit (thread_p, CSECT_HEAP_CHNGUESS);
@@ -19953,8 +19962,8 @@ static int
 heap_is_valid_oid (THREAD_ENTRY * thread_p, OID * oid_p)
 {
   DISK_ISVALID oid_valid = HEAP_ISVALID_OID (thread_p, oid_p);
-
-  if (oid_valid != DISK_VALID)
+                           // disk에 할당된 데이터를 oid가 가리키고 있는지 확인하는 것 같음
+  if (oid_valid != DISK_VALID) // 문제가 없으면 NO_ERROR 반환
     {
       if (oid_valid != DISK_ERROR)
 	{
@@ -20838,20 +20847,20 @@ heap_log_insert_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
       INT16 bytes_reserved;
       RECDES temp_recdes;
 
-      if (recdes_p->type == REC_ASSIGN_ADDRESS)
-	{
+      if (recdes_p->type == REC_ASSIGN_ADDRESS) // ASSIGN_ADDRESS인 경우 temp_recdes를 생성하고 2바이트의 길이와, 데이터에는 452가 들어감
+	{                                       // ASSIGN_ADDRESS가 길이가 452인데, 왜인지는 모르겠음
 	  /* special case for REC_ASSIGN */
 	  temp_recdes.type = recdes_p->type;
-	  temp_recdes.area_size = sizeof (bytes_reserved);
-	  temp_recdes.length = sizeof (bytes_reserved);
+	  temp_recdes.area_size = sizeof (bytes_reserved); // 2바이트씩만 잡힘
+	  temp_recdes.length = sizeof (bytes_reserved); // 2바이트씩만 잡힘
 	  bytes_reserved = (INT16) recdes_p->length;
 	  temp_recdes.data = (char *) &bytes_reserved;
-	  log_append_undoredo_recdes (thread_p, RVHF_INSERT, &log_addr, NULL, &temp_recdes);
+	  log_append_undoredo_recdes (thread_p, RVHF_INSERT, &log_addr, NULL, &temp_recdes); // temp_recdes logging
 	}
       else if (recdes_p->type == REC_NEWHOME)
 	{
 	  /* replication for REC_NEWHOME is performed by following the link (OID) from REC_RELOCATION */
-	  log_append_undoredo_recdes (thread_p, RVHF_INSERT_NEWHOME, &log_addr, NULL, recdes_p);
+	  log_append_undoredo_recdes (thread_p, RVHF_INSERT_NEWHOME, &log_addr, NULL, recdes_p); // newhome logging은 RVHF_INSERT_NEWHOME로 함
 	}
       else
 	{
@@ -20927,7 +20936,7 @@ heap_get_record_location (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * cont
   if (context->home_page_watcher_p->pgptr == NULL)
     {
       (void) heap_scan_pb_lock_and_fetch (thread_p, &vpid, OLD_PAGE, X_LOCK, context->scan_cache_p,
-					  context->home_page_watcher_p);
+					  context->home_page_watcher_p); // vpid에 해당하는 페이지 X_LOCK으로 fix하고, context->home_page_watcher_p에 할당
       if (context->home_page_watcher_p->pgptr == NULL)
 	{
 	  int rc;
@@ -22645,7 +22654,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
     }
 
 #if defined (SERVER_MODE)
-  if (is_mvcc_op)
+  if (is_mvcc_op) // recovery 관련 설정
     {
       undo_rcvindex = RVHF_UPDATE_NOTIFY_VACUUM;
     }
@@ -22660,7 +22669,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
       undo_rcvindex = RVHF_UPDATE;
     }
 
-  if (heap_is_big_length (context->recdes_p->length))
+  if (heap_is_big_length (context->recdes_p->length)) // overflow 대상인지 확인
     {
       /* fix header page */
       error_code = heap_fix_header_page (thread_p, context);
@@ -22692,7 +22701,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
       perfmon_inc_stat (thread_p, PSTAT_HEAP_HOME_TO_BIG_UPDATES);
     }
   else if (!spage_is_updatable (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid,
-				context->recdes_p->length))
+				context->recdes_p->length)) // home으로 update 가능한지 아니면 size가 맞지 않는지 판별
     {
       /* insert new home */
 
@@ -22736,9 +22745,9 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
 
       perfmon_inc_stat (thread_p, PSTAT_HEAP_HOME_TO_REL_UPDATES);
     }
-  else
+  else // home 내에 update 가능하다면
     {
-      context->recdes_p->type = REC_HOME;
+      context->recdes_p->type = REC_HOME; // type 설정
 
       /* updated record fits in home page */
       home_page_updated_recdes_p = context->recdes_p; // home type 데이터를 update할 때 home_page_updated_recdes_p를 활용함. context->recdes_p=new_data
@@ -22768,8 +22777,8 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
     }
 
   /* log home update */
-  heap_log_update_physical (thread_p, context->home_page_watcher_p->pgptr, &context->hfid.vfid, &context->oid,
-			    &context->home_recdes, home_page_updated_recdes_p, undo_rcvindex); // log update해줌
+  heap_log_update_physical (thread_p, context->home_page_watcher_p->pgptr, &context->hfid.vfid, &context->oid, // log update 수행
+			    &context->home_recdes, home_page_updated_recdes_p, undo_rcvindex);
 
   /* undo lsa for SUPPLEMENT_UPDATE : REC_HOME to REC_RELOCATION/BIGONE 
    * if redo lsa is NULL , then append redo lsa :update REC_HOME to REC_HOME case */
@@ -22790,7 +22799,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
   /* physical update of home record */
   error_code =
     heap_update_physical (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid,
-			  home_page_updated_recdes_p);
+			  home_page_updated_recdes_p); // heap_update 수행할 때 실제 데이터를 바꿔서 삽입함. delete는 mvccid만 남김
   if (error_code != NO_ERROR)
     {
       assert (false);
@@ -22801,7 +22810,7 @@ heap_update_home (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, boo
   if (is_mvcc_op)
     {
       /* the updated record needs the prev version lsa to the undo log record where the old record can be found */
-      error_code = heap_update_set_prev_version (thread_p, &context->oid, context->home_page_watcher_p, // mvcc version을 이전 버전으로 설정
+      error_code = heap_update_set_prev_version (thread_p, &context->oid, context->home_page_watcher_p, // old 데이터를 mvcc 이전 버전으로 설정
 						 newhome_pg_watcher_p, &prev_version_lsa);
       if (error_code != NO_ERROR)
 	{
@@ -22910,8 +22919,8 @@ heap_log_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
   /* actual logging */
   if (LOG_IS_MVCC_HEAP_OPERATION (rcvindex))
     {
-      HEAP_PAGE_VACUUM_STATUS vacuum_status = heap_page_get_vacuum_status (thread_p, page_p);
-      heap_page_update_chain_after_mvcc_op (thread_p, page_p, logtb_get_current_mvccid (thread_p));
+      HEAP_PAGE_VACUUM_STATUS vacuum_status = heap_page_get_vacuum_status (thread_p, page_p); // vaccum 상태 반환
+      heap_page_update_chain_after_mvcc_op (thread_p, page_p, logtb_get_current_mvccid (thread_p)); // vaccum 상태에 따라서 mvcc_op 실행
       if (heap_page_get_vacuum_status (thread_p, page_p) != vacuum_status)
 	{
 	  /* Mark vacuum status change for recovery. */
@@ -22925,7 +22934,7 @@ heap_log_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
     }
   else
     {
-      log_append_undoredo_recdes (thread_p, rcvindex, &address, old_recdes_p, new_recdes_p);
+      log_append_undoredo_recdes (thread_p, rcvindex, &address, old_recdes_p, new_recdes_p); // log_append
     }
 }
 
@@ -22940,7 +22949,8 @@ heap_log_update_physical (THREAD_ENTRY * thread_p, PAGE_PTR page_p, VFID * vfid_
 void
 heap_create_insert_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID * class_oid_p, RECDES * recdes_p,
 			    HEAP_SCANCACHE * scancache_p)
-{ // insert를 위한 context 만들어줌 || 1. recdes_p=파라미터로 전달된 recdes_p 2. scan_cache_p=파라미터로 전달된 scancache_p 3. type=insert 4. use_bulk_logging=false
+{ // insert를 위한 operation context 만들어줌 || 1. recdes_p=파라미터로 전달된 recdes_p 2. scan_cache_p=파라미터로 전달된 scancache_p
+  // 3. type=insert 4. use_bulk_logging=false
   assert (context != NULL);
   assert (hfid_p != NULL);
   assert (recdes_p != NULL);
@@ -22994,20 +23004,20 @@ heap_create_delete_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID
 void
 heap_create_update_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID * oid_p, OID * class_oid_p,
 			    RECDES * recdes_p, HEAP_SCANCACHE * scancache_p, UPDATE_INPLACE_STYLE in_place)
-{
+{ // update operation에 쓰일 context 생성
   assert (context != NULL);
   assert (hfid_p != NULL);
   assert (oid_p != NULL);
   assert (class_oid_p != NULL);
   assert (recdes_p != NULL);
 
-  heap_clear_operation_context (context, hfid_p);
+  heap_clear_operation_context (context, hfid_p); // context 초기값 세팅
   COPY_OID (&context->oid, oid_p);
   COPY_OID (&context->class_oid, class_oid_p);
   context->recdes_p = recdes_p;
   context->scan_cache_p = scancache_p;
-  context->type = HEAP_OPERATION_UPDATE;
-  context->update_in_place = in_place;
+  context->type = HEAP_OPERATION_UPDATE; // type update로 변경
+  context->update_in_place = in_place; // in_place 여부는 heap_create_update_context() 함수 호출할 때 in_place 인자로 정해서 호출함
   context->use_bulk_logging = false;
 }
 
@@ -23181,7 +23191,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   HEAP_PERF_TRACK_LOGGING (thread_p, context);
 
   /* mark insert page as dirty */
-  pgbuf_set_dirty (thread_p, context->home_page_watcher_p->pgptr, DONT_FREE); // dirty 설정
+  pgbuf_set_dirty (thread_p, context->home_page_watcher_p->pgptr, DONT_FREE); // page dirty 설정
 
   /*
    * Page unfix or caching
@@ -23196,11 +23206,11 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   else
     {
       /* unfix */
-      pgbuf_ordered_unfix (thread_p, context->home_page_watcher_p);
+      pgbuf_ordered_unfix (thread_p, context->home_page_watcher_p); // page unfix
     }
 
   /* unfix other pages */
-  heap_unfix_watchers (thread_p, context);
+  heap_unfix_watchers (thread_p, context); // home, overflow, hdr, fwd 페이지 잡아놓은게 있다면 unfix
 
   /*
    * Class creation case
@@ -23468,14 +23478,14 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
 
   /* check scancache */
   rc = heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p);
-  if (rc != NO_ERROR)
+  if (rc != NO_ERROR)           // scancache.hfid 검사
     {
       ASSERT_ERROR ();
       return rc;
     }
 
   /* check file type */
-  context->file_type = heap_get_file_type (thread_p, context);
+  context->file_type = heap_get_file_type (thread_p, context); // context.scancache.file_type 반환
   if (context->file_type != FILE_HEAP && context->file_type != FILE_HEAP_REUSE_SLOTS)
     {
       if (context->file_type == FILE_UNKNOWN_TYPE)
@@ -23507,7 +23517,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
     }
 
   /* check provided object identifier */
-  rc = heap_is_valid_oid (thread_p, &context->oid);
+  rc = heap_is_valid_oid (thread_p, &context->oid); // disk 관점에서 validation하는듯
   if (rc != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -23515,17 +23525,17 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
     }
 
   /* by default, consider it old */
-  context->is_logical_old = true;
-
+  context->is_logical_old = true; // 초기 record가 REC_ASSIGN_ADDRESS였다면 is_logical_old은 true. update하면 REC_ASSIGN_ADDRESS일 수가 없기 때문에 true
+                                  // record_type이 assign_address인 경우 false
   is_mvcc_class = !mvcc_is_mvcc_disabled_class (&context->class_oid);
   /*
    * Determine type of operation
    */
-  is_mvcc_op = HEAP_UPDATE_IS_MVCC_OP (is_mvcc_class, context->update_in_place);
+  is_mvcc_op = HEAP_UPDATE_IS_MVCC_OP (is_mvcc_class, context->update_in_place); // is_mvcc_class && !(HEAP_IS_UPDATE_INPLACE) 조건에 맞아야 true
 #if defined (SERVER_MODE)
   assert ((!is_mvcc_op && HEAP_IS_UPDATE_INPLACE (context->update_in_place))
-	  || (is_mvcc_op && !HEAP_IS_UPDATE_INPLACE (context->update_in_place)));
-  /* the update in place concept should be changed in terms of mvcc */
+	  || (is_mvcc_op && !HEAP_IS_UPDATE_INPLACE (context->update_in_place))); // is_mvcc_op이면 !(HEAP_IS_UPDATE_INPLACE)이어야 함
+  /* the update in place concept should be changed in terms of mvcc */ // inplace update를 진행하면 기존 값이 덮어 써지기 때문에 mvcc를 지원할 수 없다는 뜻 같음
 #endif /* SERVER_MODE */
 
 #if defined(ENABLE_SYSTEMTAP)
@@ -23543,7 +23553,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
     }
 
   /* decache guessed representation */
-  HEAP_MAYNEED_DECACHE_GUESSED_LASTREPRS (&context->oid, &context->hfid);
+  HEAP_MAYNEED_DECACHE_GUESSED_LASTREPRS (&context->oid, &context->hfid); // context->hfid가 roothfid이면
 
   /*
    * Fetch record
@@ -23557,8 +23567,8 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
       goto exit;
     }
 
-  context->home_recdes.area_size = DB_PAGESIZE;
-  context->home_recdes.data = PTR_ALIGN (context->home_recdes_buffer, MAX_ALIGNMENT);
+  context->home_recdes.area_size = DB_PAGESIZE; // DB_PAGESIZE 할당
+  context->home_recdes.data = PTR_ALIGN (context->home_recdes_buffer, MAX_ALIGNMENT); // data에 buffer되어 있는 포인터 할당
   if (spage_get_record (thread_p, context->home_page_watcher_p->pgptr, context->oid.slotid, &context->home_recdes, COPY)
       != S_SUCCESS) // old_data를 context->home_recdes에 저장
     {
@@ -23638,7 +23648,7 @@ heap_update_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context)
   /*
    * Class update case
    */
-  if (HFID_EQ ((&context->hfid), &(heap_Classrepr->rootclass_hfid)))
+  if (HFID_EQ ((&context->hfid), &(heap_Classrepr->rootclass_hfid))) // update하려는 데이터의 hfid가 root_hfid라면(class_oid라면)
     {
       rc = heap_mark_class_as_modified (thread_p, &context->oid, or_chn (context->recdes_p), false);
       if (rc != NO_ERROR)
@@ -23703,8 +23713,8 @@ heap_get_class_info_from_record (THREAD_ENTRY * thread_p, const OID * class_oid,
       return ER_FAILED;
     }
 
-  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache);
-
+  (void) heap_scancache_quick_start_root_hfid (thread_p, &scan_cache); // root_hfid로 scancache 생성
+  // 지금 scan_cache에는 root_hfid밖에 없음
   if (heap_get_class_record (thread_p, class_oid, &recdes, &scan_cache, PEEK) != S_SUCCESS)
     {
       heap_scancache_end (thread_p, &scan_cache);
@@ -23783,7 +23793,7 @@ heap_hfid_table_entry_free (void *entry)
 static int
 heap_hfid_table_entry_init (void *entry)
 {
-  HEAP_HFID_TABLE_ENTRY *entry_p = (HEAP_HFID_TABLE_ENTRY *) entry;
+  HEAP_HFID_TABLE_ENTRY *entry_p = (HEAP_HFID_TABLE_ENTRY *) entry; // 이 entry가 어디로 반환되는지는 모르겠음
 
   if (entry_p == NULL)
     {
@@ -23791,7 +23801,7 @@ heap_hfid_table_entry_init (void *entry)
     }
 
   /* initialize fields */
-  OID_SET_NULL (&entry_p->class_oid);
+  OID_SET_NULL (&entry_p->class_oid); // null로 초기화해서 반환
   entry_p->hfid.vfid.fileid = NULL_FILEID;
   entry_p->hfid.vfid.volid = NULL_VOLID;
   entry_p->hfid.hpgid = NULL_PAGEID;
@@ -24192,12 +24202,12 @@ heap_cache_class_info (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hf
  *	retrieved from the class record.
  */
 static int
-xheap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfid_out, FILE_TYPE * ftype_out,
+heap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfid_out, FILE_TYPE * ftype_out,
 		     char **classname_out)
-{
+{ // entry에서 hfid_out, ftype_out, classname_out 반환하는 것 같음
   int error_code = NO_ERROR;
-  LF_TRAN_ENTRY *t_entry = thread_get_tran_entry (thread_p, THREAD_TS_HFID_TABLE);
-  HEAP_HFID_TABLE_ENTRY *entry = NULL;
+  LF_TRAN_ENTRY *t_entry = thread_get_tran_entry (thread_p, THREAD_TS_HFID_TABLE); // thread entry 반환
+  HEAP_HFID_TABLE_ENTRY *entry = NULL; // hfid 테이블 entry
   char *classname_local = NULL;
   int inserted = 0;
 
@@ -24205,7 +24215,7 @@ xheap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfi
 
   error_code =
     lf_hash_find_or_insert (t_entry, &heap_Hfid_table->hfid_hash, (void *) class_oid, (void **) &entry, &inserted);
-  if (error_code != NO_ERROR)
+  if (error_code != NO_ERROR) // 전역 heap_Hfid_table에서 entry, inserted 받아오기. inserted는 삽입된 데이터 개수같음
     {
       ASSERT_ERROR ();
       return error_code;
@@ -24216,7 +24226,7 @@ xheap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfi
    *  inserters. This means that if this field is already set by someone else, then the entry data is already
    *  mature so we don't need to add data again.
    */
-  if (entry->classname == NULL)
+  if (entry->classname == NULL) // 찾은 entry의 classname이 null이면
     {
       HFID hfid_local = HFID_INITIALIZER;
 
@@ -24229,7 +24239,7 @@ xheap_hfid_cache_get (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * hfi
 	  lf_tran_end_with_mb (t_entry);
 	  return NO_ERROR;
 	}
-
+      // entry->classname이 null이면 새로 만들어진 entry에 해당하는 것 같음
       /* this is either a newly inserted entry or one with incomplete information that is currently being filled by
        * another transaction. We need to retrieve the HFID from the class record. We do not care that we are
        * overwriting the information, since it must be always the same (the HFID never changes for the same class OID). */
@@ -24322,14 +24332,14 @@ heap_get_hfid_if_cached (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * 
 
   *success = false;
 
-  error_code = lf_hash_find (t_entry, &heap_Hfid_table->hfid_hash, (void *) class_oid, (void **) &entry);
+  error_code = lf_hash_find (t_entry, &heap_Hfid_table->hfid_hash, (void *) class_oid, (void **) &entry); // entry에 값 받아오는듯
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
       return error_code;
     }
 
-  if (entry)
+  if (entry) // entry 찾았다면
     {
       assert (entry->hfid.hpgid != NULL_PAGEID && entry->hfid.vfid.fileid != NULL_FILEID
 	      && entry->hfid.vfid.volid != NULL_VOLID && entry->classname != NULL);
@@ -24342,15 +24352,15 @@ heap_get_hfid_if_cached (THREAD_ENTRY * thread_p, const OID * class_oid, HFID * 
 	{
 	  *ftype_out = entry->ftype;
 	}
-      if (classname_out != NULL)
+      if (classname_out != NULL) // 인자값 classname_out이 null이 아닌 상태로 호출됐으면
 	{
-	  *classname_out = entry->classname;
+	  *classname_out = entry->classname; // entry의 classname 할당
 	}
 
       *success = true;
 
       lf_tran_end_with_mb (t_entry);
-    }
+    } // entry 못 찾고 return할 수 있음
 
   return NO_ERROR;
 }
@@ -24603,7 +24613,7 @@ heap_page_get_vacuum_status (THREAD_ENTRY * thread_p, PAGE_PTR heap_page)
   assert (heap_page != NULL);
 
   /* Get heap chain. */
-  if (spage_get_record (thread_p, heap_page, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS)
+  if (spage_get_record (thread_p, heap_page, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS) // heap_chain 반환
     {
       assert_release (false);
       return HEAP_PAGE_VACUUM_UNKNOWN;
@@ -24616,7 +24626,7 @@ heap_page_get_vacuum_status (THREAD_ENTRY * thread_p, PAGE_PTR heap_page)
     }
   chain = (HEAP_CHAIN *) chain_recdes.data;
 
-  return HEAP_PAGE_GET_VACUUM_STATUS (chain);
+  return HEAP_PAGE_GET_VACUUM_STATUS (chain); // chain->flag에서 MVCC 정보 얻어옴
 }
 
 /*
@@ -25077,7 +25087,8 @@ heap_get_visible_version (THREAD_ENTRY * thread_p, const OID * oid, OID * class_
 SCAN_CODE
 heap_scan_get_visible_version (THREAD_ENTRY * thread_p, const OID * oid, OID * class_oid, RECDES * recdes,
 			       RECDES * peeked_recdes, HEAP_SCANCACHE * scan_cache, int ispeeking, int old_chn)
-{
+{ // mvcc를 호출해서 visible 레코드 획득
+// 1. ispeeking이 true라면 peeked_recdes를 recdes에 할당, 2. ispeeking이 false라면 oid에 해당하는 레코드 recdes에 할당
   SCAN_CODE scan = S_SUCCESS;
   HEAP_GET_CONTEXT context;
 
@@ -25134,11 +25145,11 @@ heap_scan_get_visible_version (THREAD_ENTRY * thread_p, const OID * oid, OID * c
       /* fall through.. */
     }
 
-  heap_init_get_context (thread_p, &context, oid, class_oid, recdes, scan_cache, ispeeking, old_chn);
+  heap_init_get_context (thread_p, &context, oid, class_oid, recdes, scan_cache, ispeeking, old_chn); // get scontext 생성
 
-  scan = heap_get_visible_version_internal (thread_p, &context, true);
+  scan = heap_get_visible_version_internal (thread_p, &context, true); // get context에 recdes 할당
 
-  heap_clean_get_context (thread_p, &context);
+  heap_clean_get_context (thread_p, &context); // 다 사용한 get context 초기화
 
   return scan;
 }
@@ -25153,7 +25164,7 @@ heap_scan_get_visible_version (THREAD_ENTRY * thread_p, const OID * oid, OID * c
  */
 SCAN_CODE
 heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, bool is_heap_scan)
-{
+{ // 무조건 최신으로 보여주는게 아니라, disk와의 호환성을 맞춰서 레코드를 반환하는 것 같음
   SCAN_CODE scan;
 
   MVCC_SNAPSHOT *mvcc_snapshot = NULL;
@@ -25168,10 +25179,10 @@ heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * c
       context->class_oid_p = &class_oid_local;
     }
 
-  if (context->scan_cache && context->ispeeking == COPY && context->recdes_p != NULL)
+  if (context->scan_cache && context->ispeeking == COPY && context->recdes_p != NULL) // ispeeking == COPY 라면
     {
       /* Allocate an area to hold the object. Assume that the object will fit in two pages for not better estimates. */
-      if (heap_scan_cache_allocate_area (thread_p, context->scan_cache, DB_PAGESIZE * 2) != NO_ERROR) // context의 scan_cache allocate
+      if (heap_scan_cache_allocate_area (thread_p, context->scan_cache, DB_PAGESIZE * 2) != NO_ERROR) // scan_cache를 위한 공간 allocate
 	{
 	  return S_ERROR;
 	}
@@ -25225,7 +25236,7 @@ heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * c
       /* else...fall through to heap get */
     }
 
-  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn)) // 뭔지 모르겠지만 create table 시 여기에 해당돼서 바로 exit로 가는 경우가 있음
+  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn)) // chn sync가 맞아서 반영할게 없을 때 이 조건이 true가 됨
     {
       /* Object version didn't change and CHN is up-to-date. Don't get record data and return
        * S_SUCCESS_CHN_UPTODATE instead. */
@@ -25235,7 +25246,7 @@ heap_get_visible_version_internal (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * c
 
   if (context->recdes_p != NULL)
     {
-      scan = heap_get_record_data_when_all_ready (thread_p, context);
+      scan = heap_get_record_data_when_all_ready (thread_p, context); // 레코드 타입에 따라 context에 recdes 받아옴
     }
 
   /* Fall through to exit. */
@@ -25366,7 +25377,7 @@ end:
  */
 SCAN_CODE
 heap_get_last_version (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
-{
+{ // context의 데이터를 디스크와 비교해서 최신 버전으로 가져오는 함수임. context->old_chn로 디스크와 싱크를 비교했는데 안 맞으면 최신으로 가져옴
   SCAN_CODE scan = S_SUCCESS;
   MVCC_REC_HEADER mvcc_header = MVCC_REC_HEADER_INITIALIZER;
 
@@ -25392,13 +25403,13 @@ heap_get_last_version (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
   assert (context->record_type == REC_HOME
 	  || (!OID_ISNULL (&context->forward_oid) && context->fwd_page_watcher.pgptr != NULL));
 
-  scan = heap_get_mvcc_header (thread_p, context, &mvcc_header); // 데이터 타입에 맞게 mvcc header 획득
+  scan = heap_get_mvcc_header (thread_p, context, &mvcc_header); // 데이터 타입에 맞게 context->oid의 mvcc header 획득
   if (scan != S_SUCCESS)
     {
       goto exit;
     }
 
-  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn))
+  if (MVCC_IS_CHN_UPTODATE (&mvcc_header, context->old_chn)) // context->old_chn가 cas-server와 싱크가 맞고 굳이 추가로 가져올 이유가 없다면 함수 종료
     {
       /* Object version didn't change and CHN is up-to-date. Don't get record data and return
        * S_SUCCESS_CHN_UPTODATE instead. */
@@ -25518,11 +25529,11 @@ heap_clean_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context)
 void
 heap_init_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, const OID * oid, OID * class_oid,
 		       RECDES * recdes, HEAP_SCANCACHE * scan_cache, int ispeeking, int old_chn)
-{ // context를 전달된 인자값으로 초기화
+{ // get_context를 전달된 인자값으로 초기화(oid, class_oid, recdes, scan_cache, ispeeking, old_chn, scancache->latch_mode)
   context->oid_p = oid; // 전달된 oid 값을 context에 할당
   context->class_oid_p = class_oid; // 전달된 class_oid 값을 context에 할당
   OID_SET_NULL (&context->forward_oid); // context->forward_oid 초기화. context->forward_oid는 relocation이나 bigone
-  context->recdes_p = recdes;
+  context->recdes_p = recdes; // 전달된 recdes 할당
 
   if (scan_cache != NULL && !HFID_IS_NULL (&scan_cache->node.hfid))
     {
@@ -25543,7 +25554,7 @@ heap_init_get_context (THREAD_ENTRY * thread_p, HEAP_GET_CONTEXT * context, cons
 
   context->scan_cache = scan_cache; // context에 전달된 scan_cache 할당
   context->ispeeking = ispeeking;
-  context->old_chn = old_chn;
+  context->old_chn = old_chn; // 전달된 chn 버전을 넣어둠. 나중에 이걸 기반으로 싱크를 다시 맞춰야 되는지 체크함
   if (scan_cache != NULL && scan_cache->page_latch == X_LOCK)
     {
       context->latch_mode = PGBUF_LATCH_WRITE;
@@ -25601,7 +25612,7 @@ heap_scan_cache_allocate_recdes_data (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * 
 SCAN_CODE
 heap_get_class_record (THREAD_ENTRY * thread_p, const OID * class_oid, RECDES * recdes_p, HEAP_SCANCACHE * scan_cache,
 		       int ispeeking)
-{ // scan_cache를 참고하여 context를 생성하고, mvcc로부터 마지막 버전을 얻어서 주어진 recdes_p에 record 할당
+{ // scan_cache로 context를 생성하고, 인자로 주어진 class_oid 정보를 recdes_p에  할당
   HEAP_GET_CONTEXT context;
   OID root_oid = *oid_Root_class_oid; // 전역 oid_root_class 소환
   SCAN_CODE scan;

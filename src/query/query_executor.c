@@ -14021,7 +14021,7 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 
       if (locator_start_force_scan_cache (thread_p, &scan_cache, &insert->class_hfid, &class_oid,
 					  scan_cache_op_type) != NO_ERROR)
-	{
+	{ // scan_cache에 값 채움(class_oid, hfid 등등...)
 	  GOTO_EXIT_ON_ERROR;
 	}
       scan_cache_inited = true;
@@ -14075,8 +14075,8 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 		  GOTO_EXIT_ON_ERROR;
 		}
 
-	      if (heap_attrinfo_clear_dbvalues (&attr_info) != NO_ERROR)
-		{
+	      if (heap_attrinfo_clear_dbvalues (&attr_info) != NO_ERROR) // 이걸 왜 초기화하는지 모르겠음
+		{                                                 // 위에서 일부러 만든 attrinfo 아닌가?
 		  GOTO_EXIT_ON_ERROR;
 		}
 	      for (k = 0; k < val_no; ++k)
@@ -14098,7 +14098,7 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 
 
 		  rc = heap_attrinfo_set (NULL, insert->att_id[k], insert->vals[k], &attr_info);
-		  if (rc != NO_ERROR)
+		  if (rc != NO_ERROR) // 위에서 초기화한걸 왜 또?
 		    {
 		      GOTO_EXIT_ON_ERROR;
 		    }

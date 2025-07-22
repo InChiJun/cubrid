@@ -3712,7 +3712,7 @@ spage_search_record (PAGE_PTR page_p, PGSLOTID * out_slot_id_p, RECDES * record_
     }
   else
     {
-      slot_id += direction; // 처음부터 1을 시작으로 하게끔 설정함
+      slot_id += direction; // 인자로 전달된 direction만큼 건너뛰어서 시작점 지정
     }
 
   slot_p = spage_find_slot (page_p, page_header_p, slot_id, false);

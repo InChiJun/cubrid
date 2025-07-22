@@ -253,13 +253,13 @@ typedef enum
 enum update_inplace_style
 {
   UPDATE_INPLACE_NONE = 0,	/* None */
-  UPDATE_INPLACE_CURRENT_MVCCID = 1,	/* non-MVCC in-place update style with current MVCC ID. */
-  UPDATE_INPLACE_OLD_MVCCID = 2	/* non-MVCC in-place update style with old MVCC ID. Preserves old MVCC ID */
+  UPDATE_INPLACE_CURRENT_MVCCID = 1,	/* non-MVCC in-place update style with current MVCC ID. */ // 현재 트랜잭션이 업데이트하려는 MVCCID로 덮어씀
+  UPDATE_INPLACE_OLD_MVCCID = 2	/* non-MVCC in-place update style with old MVCC ID. Preserves old MVCC ID */ // 기존 MVCCID를 냅두고 현재 트랜잭션이 업데이트하려는 MVCCID는 다른 곳에 작성하는듯
 };
 typedef enum update_inplace_style UPDATE_INPLACE_STYLE;
 
 /* Currently mvcc update is also executed inplace, but coresponds to UPDATE_INPLACE_NONE. TODO: Refactor */
-#define HEAP_IS_UPDATE_INPLACE(update_inplace_style) \
+#define HEAP_IS_UPDATE_INPLACE(update_inplace_style) \ // UPDATE_INPLACE_NONE만 아니면 됨
   ((update_inplace_style) != UPDATE_INPLACE_NONE)
 
 /* heap operation information structure */
