@@ -322,7 +322,7 @@ es_posix_final (void)
  * new_path(out): file path newly created
  */
 int
-xes_posix_create_file (char *new_path)
+xes_posix_create_file (char *new_path, char *volid_str)
 {
   int fd;
   int ret, n;
@@ -335,7 +335,7 @@ retry:
 		dirname2, PATH_SEPARATOR, filename);
 #else
   /* default */
-  n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname1, PATH_SEPARATOR, filename);
+  n = snprintf (new_path, PATH_MAX - 1, "%s%c%s%c%s", volid_str, PATH_SEPARATOR, dirname1, PATH_SEPARATOR, filename);
 #endif
   if (n < 0)
     {
@@ -354,7 +354,10 @@ retry:
     {
       if (errno == ENOENT)
 	{
-	  ret = es_make_dirs (dirname1, dirname2);
+          char temp[PATH_MAX];
+          sprintf(temp, "%s%c", volid_str, PATH_SEPARATOR);
+          strcat (temp, dirname1);
+	  ret = es_make_dirs (temp, dirname2);
 	  if (ret != NO_ERROR)
 	    {
 	      return ret;

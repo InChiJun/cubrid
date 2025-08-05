@@ -4213,7 +4213,7 @@ retry:
   context.n_cache_vol_reserve = 0;
   context.purpose = purpose;
 
-  error_code = disk_reserve_from_cache (thread_p, &context, &did_extend);
+  error_code = disk_reserve_from_cache (thread_p, &context, &did_extend); // 여기서 첫 번째로 정해지나?
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -4222,7 +4222,7 @@ retry:
 
   for (iter = 0; iter < context.n_cache_vol_reserve; iter++)
     {
-      error_code = disk_reserve_sectors_in_volume (thread_p, iter, &context);
+      error_code = disk_reserve_sectors_in_volume (thread_p, iter, &context); // 여기서 두 번째로 정해지나?
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();

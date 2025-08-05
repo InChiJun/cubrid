@@ -1642,7 +1642,7 @@ locator_fetch_lockhint_classes (LC_LOCKHINT * lockhint, LC_COPYAREA ** fetch_cop
  * NOTE:
  */
 int
-heap_create (HFID * hfid, const OID * class_oid, bool reuse_oid)
+heap_create (HFID * hfid, const OID * class_oid, bool reuse_oid, int lob_exist)
 {
 #if defined(CS_MODE)
   int error = ER_NET_CLIENT_DATA_RECEIVE;
@@ -1658,6 +1658,7 @@ heap_create (HFID * hfid, const OID * class_oid, bool reuse_oid)
 
   ptr = or_pack_hfid (request, hfid);
   ptr = or_pack_oid (ptr, (OID *) class_oid);
+  ptr = or_pack_int (ptr, lob_exist);
   ptr = or_pack_int (ptr, (int) reuse_oid);
   req_error =
     net_client_request (NET_SERVER_HEAP_CREATE, request, OR_ALIGNED_BUF_SIZE (a_request), reply,
@@ -1671,10 +1672,37 @@ heap_create (HFID * hfid, const OID * class_oid, bool reuse_oid)
   return error;
 #else /* CS_MODE */
   int success;
+  struct stat statbuf;
 
   THREAD_ENTRY *thread_p = enter_server ();
 
-  success = xheap_create (thread_p, hfid, class_oid, reuse_oid);
+  if (!HFID_IS_NULL (hfid))
+    {
+      char lob_path[1000];
+
+      sprintf(lob_path, "/home/chijun/testdb/lob/%d", hfid->vfid.fileid);
+      
+      if (stat (lob_path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+        {
+          mkdir (lob_path, 0744);
+        }
+    }
+  else
+    {
+      success = xheap_create (thread_p, hfid, class_oid, reuse_oid);
+
+      if (lob_exist)
+        {
+          char lob_path[1000];
+
+          sprintf(lob_path, "/home/chijun/testdb/lob/%d", hfid->vfid.fileid);
+
+          if (stat (lob_path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+            {
+              mkdir (lob_path, 0744);
+            }
+        }
+    }
 
   exit_server (*thread_p);
 
@@ -11553,5 +11581,66 @@ mmon_disable_force ()
 #else /* CS_MODE */
   er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_NOT_IN_STANDALONE, 1, "memmon");
   return ER_NOT_IN_STANDALONE;
+#endif /* !CS_MODE */
+}
+
+/*
+ * alter_add_lob -
+ *
+ * return:
+ *
+ *   hfid(in):
+ *   class_oid(in):
+ *   reuse_oid(in):
+ *
+ * NOTE:
+ */
+int
+alter_add_lob (HFID * hfid, const OID * class_oid, bool reuse_oid, int lob_exist)
+{
+#if defined(CS_MODE)
+  int error = ER_NET_CLIENT_DATA_RECEIVE;
+  int req_error;
+  char *ptr;
+  OR_ALIGNED_BUF (OR_HFID_SIZE + OR_OID_SIZE + OR_INT_SIZE) a_request;
+  char *request;
+  OR_ALIGNED_BUF (OR_INT_SIZE + OR_HFID_SIZE) a_reply;
+  char *reply;
+
+  request = OR_ALIGNED_BUF_START (a_request);
+  reply = OR_ALIGNED_BUF_START (a_reply);
+
+  ptr = or_pack_hfid (request, hfid);
+  ptr = or_pack_oid (ptr, (OID *) class_oid);
+  ptr = or_pack_int (ptr, lob_exist);
+  ptr = or_pack_int (ptr, (int) reuse_oid);
+  req_error =
+    net_client_request (NET_SERVER_HEAP_CREATE, request, OR_ALIGNED_BUF_SIZE (a_request), reply,
+			OR_ALIGNED_BUF_SIZE (a_reply), NULL, 0, NULL, 0);
+  if (!req_error)
+    {
+      ptr = or_unpack_errcode (reply, &error);
+      ptr = or_unpack_hfid (ptr, hfid);
+    }
+
+  return error;
+#else /* CS_MODE */
+  int success;
+
+  THREAD_ENTRY *thread_p = enter_server ();
+
+  success = xheap_create (thread_p, hfid, class_oid, reuse_oid);
+
+    if (lob_exist)
+      {
+        char lob_path[1000];
+
+        sprintf(lob_path, "/home/chijun/testdb/lob/%d", hfid->vfid.fileid);
+        mkdir (lob_path, 0744);
+      }
+
+  exit_server (*thread_p);
+
+  return success;
 #endif /* !CS_MODE */
 }

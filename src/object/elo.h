@@ -44,7 +44,7 @@ extern "C"
 }
 #endif
 
-extern int elo_create (DB_ELO * elo);
+extern int elo_create (DB_ELO * elo, INT16 volid);
 
 extern int elo_copy_structure (const DB_ELO * elo, DB_ELO * dest);
 extern void elo_free_structure (DB_ELO * elo);

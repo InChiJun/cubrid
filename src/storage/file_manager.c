@@ -29,6 +29,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "file_manager.h"
 
@@ -3430,7 +3433,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
     {
       /* we need to consider dropped files in vacuum's list. If we create a file with a duplicate VFID, we can run
        * into problems. */
-      VSID *vsid_iter = vsids_reserved;
+      VSID *vsid_iter = vsids_reserved; // 이게 volid에 관련된 정보
       VFID vfid_iter;
       VFID found_vfid = VFID_INITIALIZER;
       MVCCID tran_mvccid = logtb_get_current_mvccid (thread_p);
@@ -4354,6 +4357,83 @@ exit:
 }
 
 /*
+ * file_lob_dir_remove () - remove lob directory.
+ */
+int
+file_lob_dir_remove (const char *path)
+{
+  struct stat statbuf;
+  DIR *d; // 전달된 path의 dir open 객체
+  size_t path_len;
+  int r = 0; // 함수 반환 result
+
+  if (stat (path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+    {
+      return 0;
+    }
+  d = opendir (path);
+  path_len = strlen (path);
+
+  if (d)
+    {
+      struct dirent *p;
+      while (!r && (p = readdir (d)))
+        {
+          int r2 = 0;
+          char *buf;
+          size_t len;
+
+          if (!strcmp (p->d_name, ".") || !strcmp (p->d_name, "..")) // .이나 ..은 pass
+            {
+              continue;
+            }
+
+          len = path_len + strlen (p->d_name) + 2;
+          buf = (char *) malloc (len);
+
+          if (buf)
+            {
+              if (snprintf (buf, len, "%s/%s", path, p->d_name) >= (int) len)
+                {
+                  // snprintf 실패로 buffer overflow 방지
+                  free (buf);
+                  r = -1;
+                  break;
+                }
+
+              if (!stat (buf, &statbuf))
+                {
+                  if (S_ISDIR(statbuf.st_mode))
+                    {
+                      r2 = file_lob_dir_remove (buf);
+                    }
+                  else
+                    {
+                      r2 = unlink (buf);
+                    }
+                }
+              free (buf);
+            }
+          else
+            {
+              r = -1;
+              break;
+            }
+
+          r = r2;
+        }
+      closedir (d);
+    }
+
+  if (!r)
+    {
+      r = rmdir (path); // 최종 root directory 삭제
+    }
+
+  return r;
+}
+
+/*
  * file_rv_destroy () - Recovery function used to destroy files.
  *
  * return	 : Error code.
@@ -4376,6 +4456,13 @@ file_rv_destroy (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
   assert (log_check_system_op_is_started (thread_p));
 
   error_code = file_destroy (thread_p, vfid, false);
+
+  char lob_path[1000];
+
+  sprintf(lob_path, "/home/chijun/testdb/lob/%d", vfid->fileid);
+  
+  error_code = file_lob_dir_remove (lob_path);
+
   if (error_code != NO_ERROR)
     {
       /* Not acceptable. */

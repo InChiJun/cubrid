@@ -2517,12 +2517,42 @@ shf_create (THREAD_ENTRY * thread_p, unsigned int rid, char *request, int reqlen
   OR_ALIGNED_BUF (OR_INT_SIZE + OR_HFID_SIZE) a_reply;
   char *reply = OR_ALIGNED_BUF_START (a_reply);
   int reuse_oid = 0;
+  int lob_exist = 0;
+  struct stat statbuf;
+  char lob_path[1000];
 
   ptr = or_unpack_hfid (request, &hfid);
   ptr = or_unpack_oid (ptr, &class_oid);
+  ptr = or_unpack_int (ptr, &lob_exist);
   ptr = or_unpack_int (ptr, &reuse_oid);
 
-  error = xheap_create (thread_p, &hfid, &class_oid, (bool) reuse_oid);
+  if (!HFID_IS_NULL (&hfid)) // alter add column
+    {
+      sprintf(lob_path, "/home/chijun/testdb/lob/%d", hfid.vfid.fileid);
+
+      if (stat (lob_path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+        {
+          /* log_sysop_end_logical_undo (thread_p, RVFL_DESTROY, NULL, sizeof (hfid.vfid), (char *) &hfid.vfid);
+             To do: alter add column으로 mkdir을 해도 abort 시 rollback을 위한 로직도 구현해줘야 함. 위 코드로는 assert() 발생함 */
+
+          mkdir (lob_path, 0744);
+        }
+    }
+  else
+    {
+      error = xheap_create (thread_p, &hfid, &class_oid, (bool) reuse_oid);
+
+      if (lob_exist)
+        {
+          sprintf(lob_path, "/home/chijun/testdb/lob/%d", hfid.vfid.fileid);
+
+          if (stat (lob_path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+            {
+              mkdir (lob_path, 0744);
+            }
+        }
+    }
+
   if (error != NO_ERROR)
     {
       (void) return_error_to_client (thread_p, rid);
@@ -8567,8 +8597,9 @@ ses_posix_create_file (THREAD_ENTRY * thread_p, unsigned int rid, char *request,
   OR_ALIGNED_BUF (OR_INT_SIZE * 2) a_reply;
   char *reply = OR_ALIGNED_BUF_START (a_reply);
   char *ptr;
+  char *temp_str; // volid for lob path
 
-  ret = xes_posix_create_file (new_path);
+  ret = xes_posix_create_file (new_path, temp_str);
   if (ret != NO_ERROR)
     {
       (void) return_error_to_client (thread_p, rid);

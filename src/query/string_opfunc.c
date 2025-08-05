@@ -25028,8 +25028,12 @@ db_char_to_clob (const DB_VALUE * src_value, DB_VALUE * result_value)
   DB_ELO *elo;
   const char *src_str;
   int src_size;
+  DB_VALUE copy_value;
 
   assert (src_value != NULL && result_value != NULL);
+
+  copy_value = *src_value;
+  copy_value.data.elo.locator += 2;
 
   src_type = DB_VALUE_DOMAIN_TYPE (src_value);
   if (src_type == DB_TYPE_NULL)
@@ -25044,8 +25048,8 @@ db_char_to_clob (const DB_VALUE * src_value, DB_VALUE * result_value)
       if (error_status == NO_ERROR)
 	{
 	  elo = db_get_elo (result_value);
-	  src_str = db_get_string (src_value);
-	  src_size = db_get_string_size (src_value);
+	  src_str = db_get_string (&copy_value); // 앞 두 바이트 제거해야 함
+	  src_size = db_get_string_size (&copy_value);
 	  if (src_size > 0)
 	    {
 	      error_status = db_elo_write (elo, 0, src_str, src_size, NULL);

@@ -564,8 +564,16 @@ do_alter_one_clause_with_template (PARSER_CONTEXT * parser, PT_NODE * alter)
 	      return error;
 	    }
 
+            // if add or drop lob column
+          MOP classop = sm_find_class (ctemplate->name); // vclass로도 구현가능한지 확인
+          SM_CLASS *class_;
+          HFID *lob_dir_hfid = NULL;
+          au_fetch_class (classop, &class_, AU_FETCH_UPDATE, DB_AUTH_ALTER);
+          lob_dir_hfid = sm_ch_heap ((MOBJ) class_);
+          error = heap_create (lob_dir_hfid, &vclass->oid_info.oid, NULL, 0);
 
 	  vclass = dbt_finish_class (ctemplate);
+
 	  if (vclass == NULL)
 	    {
 	      assert (er_errid () != NO_ERROR);

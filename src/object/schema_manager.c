@@ -13356,7 +13356,7 @@ update_class (SM_TEMPLATE * template_, MOP * classmop, int auto_res, DB_AUTH aut
   /* All objects are updated, now we can update class statistics also. */
   if (template_->class_type == SM_CLASS_CT)
     {
-      error = sm_update_statistics_without_gathering_stats (template_->op, STATS_WITH_SAMPLING);
+      error = sm_update_statistics_without_gathering_stats (template_->op, STATS_WITH_SAMPLING); //  여기
       if (error != NO_ERROR)
 	{
 	  goto error_return;
@@ -13569,6 +13569,7 @@ sm_delete_class_mop (MOP op, bool is_cascade_constraints)
   char *fk_name = NULL;
   const char *table_name;
   MOP save_user, owner;
+  bool lob_exist = false; /* lob column 존재 여부 */
 
   if (op == NULL)
     {
@@ -13672,6 +13673,11 @@ sm_delete_class_mop (MOP op, bool is_cascade_constraints)
   /* remove auto_increment serial object if exist */
   for (att = class_->ordered_attributes; att; att = att->order_link)
     {
+      if (att->type->id == DB_TYPE_BLOB || att->type->id == DB_TYPE_CLOB)
+        {
+          printf("type is %d\n", att->type->id);
+          lob_exist = true;
+        }
       if (att->auto_increment != NULL)
 	{
 	  DB_VALUE name_val;
@@ -13863,7 +13869,7 @@ sm_delete_class_mop (MOP op, bool is_cascade_constraints)
   /* inform the locator - this will mark the class MOP as deleted so all operations that require the current class
    * object must be done before calling this function */
 
-  error = locator_remove_class (op);
+  error = locator_remove_class (op, lob_exist);
   if (error != NO_ERROR)
     {
       goto end;
@@ -15714,6 +15720,8 @@ sm_truncate_using_destroy_heap (MOP class_mop)
   int partition_type = DB_NOT_PARTITIONED_CLASS;
   OID *oid = NULL;
   DB_OBJLIST *subs;
+  SM_ATTRIBUTE *att; /* lob column 존재 여부 파악에 필요 */
+  int lob_exist = 0; /* lob column 존재 여부 */
 
   oid = ws_oid (class_mop);
   assert (!OID_ISTEMP (oid));
@@ -15725,6 +15733,15 @@ sm_truncate_using_destroy_heap (MOP class_mop)
     {
       assert (er_errid () != NO_ERROR);
       return er_errid ();
+    }
+  
+  for (att = class_->ordered_attributes; att; att = att->order_link)
+    {
+      if (att->type->id == DB_TYPE_BLOB || att->type->id == DB_TYPE_CLOB)
+        {
+          printf("truncate_using_destroy_heap type is %d\n", att->type->id);
+          lob_exist = 1;
+        }
     }
 
   error = sm_partitioned_class_type (class_mop, &partition_type, NULL, NULL);
@@ -15766,7 +15783,7 @@ sm_truncate_using_destroy_heap (MOP class_mop)
     }
 
   /* Create a new heap */
-  error = heap_create (insts_hfid, oid, reuse_oid);
+  error = heap_create (insts_hfid, oid, reuse_oid, lob_exist);
   if (error != NO_ERROR)
     {
       return error;

@@ -52,6 +52,7 @@
 #include "network_interface_cl.h"
 #include "execute_statement.h"
 #include "log_lsa.hpp"
+#include "object_primitive.h"
 
 #define WS_SET_FOUND_DELETED(mop) WS_SET_DELETED(mop)
 #define MAX_FETCH_SIZE 64
@@ -5728,6 +5729,20 @@ locator_create_heap_if_needed (MOP class_mop, bool reuse_oid)
   if (HFID_IS_NULL (hfid))
     {
       OID *oid;
+      SM_CLASS *class_;
+      SM_ATTRIBUTE *attr;
+      int lob_exist = 0;
+
+      au_fetch_class (class_mop, &class_, AU_FETCH_WRITE, DB_AUTH_ALTER);
+
+      for (int i = 0, attr = class_->attributes[i]; i < class_->att_count; i++)
+        {
+          if (attr->type->id == DB_TYPE_BLOB || attr->type->id == DB_TYPE_CLOB)
+            {
+              printf("create_heap type is %d\n", attr->type->id);
+              lob_exist = 1;
+            }
+        }
 
       /* Need to update the class, must fetch it again with write purpose */
       class_obj = locator_fetch_class (class_mop, DB_FETCH_WRITE);
@@ -5748,7 +5763,7 @@ locator_create_heap_if_needed (MOP class_mop, bool reuse_oid)
 
       assert (!OID_ISNULL (sm_ch_rep_dir (class_obj)));
 
-      if (heap_create (hfid, oid, reuse_oid) != NO_ERROR)
+      if (heap_create (hfid, oid, reuse_oid, lob_exist) != NO_ERROR)
 	{
 	  return NULL;
 	}
@@ -5876,7 +5891,7 @@ locator_instance_decache (MOP mop, void *ignore)
  *              instances), and indices are deferred after commit time.
  */
 int
-locator_remove_class (MOP class_mop)
+locator_remove_class (MOP class_mop, bool lob_exist)
 {
   MOBJ class_obj;		/* The class object */
   const char *classname;	/* The classname */
@@ -5899,7 +5914,7 @@ locator_remove_class (MOP class_mop)
   insts_hfid = sm_ch_heap (class_obj);
   if (insts_hfid->vfid.fileid != NULL_FILEID)
     {
-      error_code = heap_destroy_newly_created (insts_hfid, &class_mop->oid_info.oid);
+      error_code = heap_destroy_newly_created (insts_hfid, &class_mop->oid_info.oid, lob_exist);
       if (error_code != NO_ERROR)
 	{
 	  goto error;

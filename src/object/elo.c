@@ -82,7 +82,7 @@ static const DB_ELO elo_Initializer = { -1LL, NULL, NULL, ELO_NULL, ES_NONE };
  * type(in): DB_ELO_TYPE
  */
 int
-elo_create (DB_ELO * elo)
+elo_create (DB_ELO * elo, INT16 volid)
 {
   ES_URI out_uri;
   char *uri = NULL;
@@ -90,7 +90,7 @@ elo_create (DB_ELO * elo)
 
   assert (elo != NULL);
 
-
+  sprintf (out_uri, "%d", volid);
   ret = es_create_file (out_uri);
   if (ret < NO_ERROR)
     {

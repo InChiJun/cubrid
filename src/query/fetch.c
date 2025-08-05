@@ -2500,7 +2500,20 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, val_descr *
 	{
 	  if (REGU_VARIABLE_IS_FLAGED (regu_var, REGU_VARIABLE_STRICT_TYPE_CAST) && arithptr->opcode == T_CAST_WRAP)
 	    {
-	      dom_status = tp_value_cast (peek_right, arithptr->value, arithptr->domain, false);
+              if (arithptr->domain->type->id == DB_TYPE_CLOB || arithptr->domain->type->id == DB_TYPE_BLOB)
+                {
+                  DB_VALUE lob_val = *peek_right;
+                  char result[100];
+                  *((short *) result) = obj_oid->volid;
+                  sprintf (result + 2, "%s", lob_val.data.elo.locator);
+                  lob_val.data.elo.locator = result;
+
+                  dom_status = tp_value_cast (&lob_val, arithptr->value, arithptr->domain, false); // lob_val가 hello/////////////////////
+                }
+              else
+                {
+                  dom_status = tp_value_cast (peek_right, arithptr->value, arithptr->domain, false);
+                }
 	    }
 	  else
 	    {
@@ -4076,7 +4089,7 @@ fetch_peek_dbval (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, val_descr *
 
     case TYPE_INARITH:		/* compute and fetch arithmetic expr. value */
     case TYPE_OUTARITH:
-      error = fetch_peek_arith (thread_p, regu_var, vd, obj_oid, tpl, peek_dbval);
+      error = fetch_peek_arith (thread_p, regu_var, vd, obj_oid, tpl, peek_dbval); ////////////////////////
       if (error != NO_ERROR)
 	{
 	  goto exit_on_error;

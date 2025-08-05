@@ -50,13 +50,16 @@ db_create_fbo (DB_VALUE * value, DB_TYPE type)
 {
   DB_ELO elo;
   int ret;
+  VOLID volid;
+
+  volid = *((short *) value->data.elo.locator);
 
   CHECK_1ARG_ERROR (value);
 
-  ret = elo_create (&elo);
+  ret = elo_create (&elo, volid);
   if (ret == NO_ERROR)
     {
-      ret = db_make_elo (value, type, &elo);
+      ret = db_make_elo (value, type, &elo); // value 처리 필요
       if (ret == NO_ERROR)
 	{
 	  value->need_clear = true;

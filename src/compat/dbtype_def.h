@@ -72,7 +72,7 @@ extern "C"
   typedef enum
   {
     CUBRID_STMT_NONE = -1,
-    CUBRID_STMT_ALTER_CLASS,
+    CUBRID_STMT_ALTER_CLASS, // alter add column 시 해당
     CUBRID_STMT_ALTER_SERIAL,
     CUBRID_STMT_COMMIT_WORK,
     CUBRID_STMT_REGISTER_DATABASE,
@@ -284,7 +284,7 @@ extern "C"
     DB_COL_OID,
     DB_COL_PATH,
     DB_COL_FUNC,
-    DB_COL_OTHER
+    DB_COL_OTHER // add column 시
   } DB_COL_TYPE;
 
   typedef enum db_class_modification_status

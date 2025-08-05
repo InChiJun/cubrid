@@ -40,7 +40,7 @@ extern int es_posix_init (const char *base_path);
 extern void es_posix_final (void);
 
 #if defined (SA_MODE) || defined (SERVER_MODE)
-extern int xes_posix_create_file (char *new_path);
+extern int xes_posix_create_file (char *new_path, char *volid_str);
 extern ssize_t xes_posix_write_file (const char *path, const void *buf, size_t count, off_t offset);
 extern ssize_t xes_posix_read_file (const char *path, void *buf, size_t count, off_t offset);
 extern int xes_posix_delete_file (const char *path);

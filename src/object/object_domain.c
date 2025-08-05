@@ -9718,7 +9718,7 @@ tp_value_cast_internal (const DB_VALUE * src, DB_VALUE * dest, const TP_DOMAIN *
 	}
       break;
 
-    case DB_TYPE_BLOB:
+    case DB_TYPE_BLOB: // BLOB /////////////////////////////////////////////////////////////////////////////////////
       switch (original_type)
 	{
 	case DB_TYPE_BLOB:
@@ -9753,7 +9753,13 @@ tp_value_cast_internal (const DB_VALUE * src, DB_VALUE * dest, const TP_DOMAIN *
 	}
       break;
 
-    case DB_TYPE_CLOB:
+    case DB_TYPE_CLOB: // CLOB //////////////////////////////////////////////////////////////////////////
+      target->data.elo.locator = src->data.elo.locator;
+      // srpintf (tartget->data.elo.locator + 2, "%s", );
+      // char lob_volid[10];
+      // strncpy (lob_volid, src->data.elo.locator, 2); // lob path에 쓰일 vfid 복사 // 그럼 src에 적혀 있는 hello 데이터는?
+      // target->data.elo.locator = src->data.elo.locator;
+
       switch (original_type)
 	{
 	case DB_TYPE_CLOB:

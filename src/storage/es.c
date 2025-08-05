@@ -142,6 +142,8 @@ int
 es_create_file (char *out_uri)
 {
   int ret;
+  char volid_str[10];
+  sprintf (volid_str, "%s", out_uri);
 
   assert (out_uri != NULL);
 
@@ -163,7 +165,7 @@ es_create_file (char *out_uri)
       ret = es_posix_create_file (ES_POSIX_PATH_POS (out_uri));
       es_log ("es_create_file: es_posix_create_file() -> %s: %d\n", out_uri, ret);
 #else /* CS_MODE */
-      ret = xes_posix_create_file (ES_POSIX_PATH_POS (out_uri));
+      ret = xes_posix_create_file (ES_POSIX_PATH_POS (out_uri), volid_str);
       es_log ("es_create_file: xes_posix_create_file() -> %s: %d\n", out_uri, ret);
 #endif /* SERVER_MODE || SA_MODE */
     }

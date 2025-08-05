@@ -11724,12 +11724,13 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
   SCAN_CODE xb_scan;
   SCAN_CODE ls_scan;
   XASL_NODE *aptr = NULL;
-  DB_VALUE *valp = NULL;
+  DB_VALUE *valp;
   QPROC_DB_VALUE_LIST vallist;
   int i, k;
   int val_no;
   int rc;
   OID oid;
+  OID lob_oid; // // volid for use in LOB path
   OID class_oid;
   HFID class_hfid;
   ACCESS_SPEC_TYPE *specp = NULL;
@@ -12332,7 +12333,14 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 	       k < val_no; k++, regu_list = regu_list->next, vallist = vallist->next)
 	    {
 	      regu_list->value.flags |= REGU_VARIABLE_STRICT_TYPE_CAST;
-	      if (fetch_peek_dbval (thread_p, &regu_list->value, &xasl_state->vd, &class_oid, NULL, NULL, &valp) !=
+              int type_id = (int) regu_list->value.domain->type->id;
+              if (type_id == DB_TYPE_CLOB || type_id == DB_TYPE_BLOB)
+                {
+                  printf ("ex_insert type is %d\n", type_id);
+                  lob_oid.volid = class_hfid.vfid.fileid;
+                }
+
+	      if (fetch_peek_dbval (thread_p, &regu_list->value, &xasl_state->vd, &class_oid, (OID_ISNULL(&lob_oid) ? NULL : &lob_oid), NULL, &valp) != // db elo 시작
 		  NO_ERROR)
 		{
 		  GOTO_EXIT_ON_ERROR;
@@ -12430,7 +12438,7 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 
 	  if (force_count == 0)
 	    {
-	      if (locator_attribute_info_force (thread_p, &insert->class_hfid, &oid, &attr_info, NULL, 0, operation,
+	      if (locator_attribute_info_force (thread_p, &insert->class_hfid, &oid, &attr_info, NULL, 0, operation, // heap_insert 시작
 						scan_cache_op_type, &scan_cache, &force_count, false,
 						REPL_INFO_TYPE_RBR_NORMAL, insert->pruning_type, pcontext, NULL, NULL,
 						UPDATE_INPLACE_NONE, NULL, false) != NO_ERROR)

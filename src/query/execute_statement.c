@@ -3854,7 +3854,7 @@ do_execute_statement (PARSER_CONTEXT * parser, PT_NODE * statement)
     case PT_CREATE_SERIAL:
     case PT_CREATE_TRIGGER:
     case PT_CREATE_USER:
-    case PT_ALTER:
+    case PT_ALTER: // ALTER인 경우
     case PT_ALTER_INDEX:
     case PT_ALTER_SERIAL:
     case PT_ALTER_TRIGGER:
