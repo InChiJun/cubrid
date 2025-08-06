@@ -462,4 +462,7 @@ EXPORT_IMPORT extern int pl_call (const cubpl::pl_signature & sig,
 /* memmon */
 extern int mmon_get_server_info (MMON_SERVER_INFO & server_info);
 extern int mmon_disable_force ();
+
+/* lob dir */
+extern int manage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode);
 #endif /* _NETWORK_INTERFACE_CL_H_ */

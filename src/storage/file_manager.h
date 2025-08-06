@@ -259,4 +259,7 @@ extern void file_rv_dump_vfid_and_vpid (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_set_next (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_add (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_remove (FILE * fp, int length, void *data);
+
+/* lob_dir */
+extern void xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode);
 #endif /* _FILE_MANAGER_H_ */

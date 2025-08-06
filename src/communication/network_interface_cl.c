@@ -11555,3 +11555,59 @@ mmon_disable_force ()
   return ER_NOT_IN_STANDALONE;
 #endif /* !CS_MODE */
 }
+
+/*
+ * manager_lob_dir -
+ *
+ * return:
+ *
+ *   hfid(in):
+ *   class_oid(in):
+ *   reuse_oid(in):
+ *
+ * NOTE:
+ */
+int
+manage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode)
+{
+#if defined(CS_MODE)
+  int error = ER_NET_CLIENT_DATA_RECEIVE;
+  int req_error;
+  char *ptr;
+  OR_ALIGNED_BUF (OR_HFID_SIZE + OR_OID_SIZE + OR_INT_SIZE) a_request; // OR_OID_SIZE 빼보자.
+  char *request;
+  OR_ALIGNED_BUF (OR_INT_SIZE + OR_HFID_SIZE) a_reply;
+  char *reply;
+
+  request = OR_ALIGNED_BUF_START (a_request);
+  reply = OR_ALIGNED_BUF_START (a_reply);
+
+  ptr = or_pack_hfid (request, hfid);
+  ptr = or_pack_int (ptr, (int) mode);
+  ptr = or_pack_int_array (ptr, lob_arr_length, attrid_arr);
+
+  req_error =
+    net_client_request (NET_SERVER_MANAGE_LOB_DIR, request, OR_ALIGNED_BUF_SIZE (a_request), reply,
+			OR_ALIGNED_BUF_SIZE (a_reply), NULL, 0, NULL, 0);
+  if (!req_error)
+    {
+      ptr = or_unpack_errcode (reply, &error);
+      ptr = or_unpack_hfid (ptr, hfid);
+    }
+
+  return error;
+#else /* CS_MODE */ // 구현 필요
+  // int success;
+
+  // //packing 작업
+
+  // success = xmanage_lob_dir (hfid, attrid_arr, lob_arr_length, mode);
+  // THREAD_ENTRY *thread_p = enter_server ();
+
+  // success = xheap_create (thread_p, hfid, class_oid, reuse_oid);
+
+  // exit_server (*thread_p);
+
+  // return success;
+#endif /* !CS_MODE */
+}

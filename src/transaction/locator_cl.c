@@ -52,6 +52,7 @@
 #include "network_interface_cl.h"
 #include "execute_statement.h"
 #include "log_lsa.hpp"
+#include "object_primitive.h"
 
 #define WS_SET_FOUND_DELETED(mop) WS_SET_DELETED(mop)
 #define MAX_FETCH_SIZE 64
@@ -5707,6 +5708,12 @@ locator_create_heap_if_needed (MOP class_mop, bool reuse_oid)
 {
   MOBJ class_obj;		/* The class object */
   HFID *hfid;			/* Heap where instance will be placed */
+  OID *oid;
+  SM_CLASS *class_;
+  SM_ATTRIBUTE *attr;
+  int lob_exist = 0;
+  int *lob_attrid_arr = NULL;
+  int lob_arr_length = 0;
 
   /*
    * Get the class for the instance.
@@ -5727,8 +5734,6 @@ locator_create_heap_if_needed (MOP class_mop, bool reuse_oid)
   hfid = sm_ch_heap (class_obj);
   if (HFID_IS_NULL (hfid))
     {
-      OID *oid;
-
       /* Need to update the class, must fetch it again with write purpose */
       class_obj = locator_fetch_class (class_mop, DB_FETCH_WRITE);
       if (class_obj == NULL)
@@ -5762,6 +5767,24 @@ locator_create_heap_if_needed (MOP class_mop, bool reuse_oid)
     }
 
   assert (!OID_ISNULL (sm_ch_rep_dir (class_obj)));
+
+  au_fetch_class (class_mop, &class_, AU_FETCH_WRITE, DB_AUTH_ALTER);
+
+  lob_attrid_arr = (int*) malloc (sizeof(int) * class_->att_count);
+  
+  for (attr = class_->ordered_attributes; attr; attr = attr->order_link)
+    {
+      if (attr->type->id == DB_TYPE_BLOB || attr->type->id == DB_TYPE_CLOB)
+        {
+          lob_attrid_arr[lob_arr_length++] = attr->id;
+        }
+    }
+
+  if (lob_arr_length)
+    {
+      HFID lob_hfid = *hfid;
+      manage_lob_dir(&lob_hfid, lob_attrid_arr, lob_arr_length, LOB_DIR_CREATE);
+    }
 
   return class_obj;
 }

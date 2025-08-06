@@ -53,7 +53,8 @@ typedef int mode_t;
 
 #if defined (SA_MODE) || defined (SERVER_MODE)
 /* es_posix_base_dir - */
-static char es_base_dir[PATH_MAX];
+char es_base_dir[PATH_MAX] = {0};
+// static char es_base_dir[PATH_MAX];
 
 static void es_get_unique_name (char *dirname1, char *dirname2, const char *metaname, char *filename);
 static int es_make_dirs (const char *dirname1, const char *dirname2);

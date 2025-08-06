@@ -58,6 +58,7 @@
 #include "vacuum.h"
 #include "btree_load.h"
 #include "critical_section.h"
+#include "es_posix.h"
 #if defined(SERVER_MODE)
 #include "connection_error.h"
 #endif /* SERVER_MODE */
@@ -11859,6 +11860,116 @@ exit:
     }
 
   return error_code;
+}
+
+/*
+ * file_lob_dir_remove () - remove lob directory.
+ */
+int
+file_lob_dir_remove (const char *path)
+{
+  struct stat statbuf;
+  DIR *d; // 전달된 path의 dir open 객체
+  size_t path_len;
+  int r = 0; // 함수 반환 result
+
+  if (stat (path, &statbuf) != 0 || !S_ISDIR (statbuf.st_mode))
+    {
+      return 0;
+    }
+  d = opendir (path);
+  path_len = strlen (path);
+
+  if (d)
+    {
+      struct dirent *p;
+      while (!r && (p = readdir (d)))
+        {
+          int r2 = 0;
+          char *buf;
+          size_t len;
+
+          if (!strcmp (p->d_name, ".") || !strcmp (p->d_name, "..")) // .이나 ..은 pass
+            {
+              continue;
+            }
+
+          len = path_len + strlen (p->d_name) + 2;
+          buf = (char *) malloc (len);
+
+          if (buf)
+            {
+              if (snprintf (buf, len, "%s/%s", path, p->d_name) >= (int) len)
+                {
+                  // snprintf 실패로 buffer overflow 방지
+                  free (buf);
+                  r = -1;
+                  break;
+                }
+
+              if (!stat (buf, &statbuf))
+                {
+                  if (S_ISDIR(statbuf.st_mode))
+                    {
+                      r2 = file_lob_dir_remove (buf);
+                    }
+                  else
+                    {
+                      r2 = unlink (buf);
+                    }
+                }
+              free (buf);
+            }
+          else
+            {
+              r = -1;
+              break;
+            }
+
+          r = r2;
+        }
+      closedir (d);
+    }
+
+  if (!r)
+    {
+      r = rmdir (path); // 최종 root directory 삭제
+    }
+
+  return r;
+}
+
+void
+xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode)
+{
+  char dirbuf[PATH_MAX];
+
+  switch (mode)
+  {
+    case LOB_DIR_CREATE:
+      sprintf (dirbuf, "%s/%d_%d_%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid); // es_base_dir/fileid/volid/pgid
+      mkdir (dirbuf, 0755);
+    case LOB_DIR_ADD:
+      for (int i = 0; i < lob_arr_length; i++)
+        {
+          sprintf (dirbuf, "%s/%d_%d_%d/%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[i]); // es_base_dir/fileid/volid/pgid/attrid
+          mkdir (dirbuf, 0755); // 배열에서 어떤 부분은 이상한 값으로 unpack되는 현상 고쳐야 함
+        }
+      break;
+
+    case LOB_DIR_DROP:
+      if (attrid_arr) // DROP COLUMN
+        {
+          sprintf (dirbuf, "%s/%d_%d_%d/%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
+        }
+      else // DROP TABLE
+        {
+          sprintf (dirbuf, "%s/%d_%d_%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
+        }
+
+      file_lob_dir_remove (dirbuf);
+      break;
+  }
 }
 
 /************************************************************************/
