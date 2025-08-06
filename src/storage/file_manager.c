@@ -29,6 +29,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "file_manager.h"
 
@@ -11942,34 +11945,83 @@ file_lob_dir_remove (const char *path)
 void
 xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode)
 {
+  THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
+  LOG_DATA_ADDR addr = LOG_DATA_ADDR_INITIALIZER;
+  // THREAD_ENTRY *thread_p = get_thread_entry ();
+  int max_lob_path = sizeof (short) + sizeof (int32_t) + sizeof (INT32) + sizeof (int); // volid(2) + fileid(4) + hpgid(4) + arrid(4)
   char dirbuf[PATH_MAX];
+  char rv_path[max_lob_path + 4]; // 4 = include /,_
 
   switch (mode)
   {
     case LOB_DIR_CREATE:
-      sprintf (dirbuf, "%s/%d_%d_%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid); // es_base_dir/fileid/volid/pgid
+      sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
+      sprintf (dirbuf, "%s/%s", es_base_dir, rv_path); // es_base_dir/fileid_volid_pgid
       mkdir (dirbuf, 0755);
+      // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
     case LOB_DIR_ADD:
       for (int i = 0; i < lob_arr_length; i++)
         {
-          sprintf (dirbuf, "%s/%d_%d_%d/%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[i]); // es_base_dir/fileid/volid/pgid/attrid
-          mkdir (dirbuf, 0755); // 배열에서 어떤 부분은 이상한 값으로 unpack되는 현상 고쳐야 함
+          sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[i]);
+          sprintf (dirbuf, "%s/%s", es_base_dir, rv_path); // es_base_dir/fileid_volid_pgid/attrid
+          mkdir (dirbuf, 0755);
+          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
         }
       break;
 
     case LOB_DIR_DROP:
       if (attrid_arr) // DROP COLUMN
         {
-          sprintf (dirbuf, "%s/%d_%d_%d/%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
+          sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
+          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
         }
       else // DROP TABLE
         {
-          sprintf (dirbuf, "%s/%d_%d_%d", es_base_dir, hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
+          sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
+          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
         }
 
       file_lob_dir_remove (dirbuf);
       break;
   }
+}
+
+/*
+ * file_lob_rv_destroy () - Recovery function used to destroy files.
+ *
+ * return	 : Error code.
+ * thread_p (in) : Thread entry.
+ * rcv (in)	 : Recovery data.
+ *
+ * NOTE: This can be used in one of two contexts:
+ *	 1. Logical undo of create file. Should be under a system operation that ends with commit and compensate.
+ *	 2. Run postpone for postponed file destroy. Again, this should be under a system operation, but it should end
+ *	    with a commit and run postpone (of course).
+ */
+int
+file_lob_rv_destroy (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
+{
+  const char *path = rcv->data;
+  int error_code = NO_ERROR;
+
+  // assert (sizeof (*vfid) == rcv->length);
+
+  // assert (log_check_system_op_is_started (thread_p));
+
+  char lob_path[PATH_MAX];
+
+  sprintf(lob_path, "%s%s", es_base_dir, path);
+
+  error_code = file_lob_dir_remove (lob_path);
+
+  if (error_code != NO_ERROR)
+    {
+      /* Not acceptable. */
+      assert_release (false);
+      return error_code;
+    }
+
+  return NO_ERROR;
 }
 
 /************************************************************************/

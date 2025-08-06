@@ -11574,7 +11574,7 @@ manage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAG
   int error = ER_NET_CLIENT_DATA_RECEIVE;
   int req_error;
   char *ptr;
-  OR_ALIGNED_BUF (OR_HFID_SIZE + OR_OID_SIZE + OR_INT_SIZE) a_request; // OR_OID_SIZE 빼보자.
+  OR_ALIGNED_BUF (4096) a_request;
   char *request;
   OR_ALIGNED_BUF (OR_INT_SIZE + OR_HFID_SIZE) a_reply;
   char *reply;

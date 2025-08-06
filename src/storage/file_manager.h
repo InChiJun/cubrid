@@ -262,4 +262,5 @@ extern void file_rv_dump_extdata_remove (FILE * fp, int length, void *data);
 
 /* lob_dir */
 extern void xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode);
+extern int file_lob_rv_destroy (THREAD_ENTRY * thread_p, LOG_RCV * rcv);
 #endif /* _FILE_MANAGER_H_ */

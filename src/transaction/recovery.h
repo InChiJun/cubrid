@@ -183,8 +183,9 @@ typedef enum
 
   RVPGBUF_SET_TDE_ALGORITHM = 127,
   RVFL_FHEAD_SET_TDE_ALGORITHM = 128,
+  RVFL_LOB_DIR_DESTROY = 129,
 
-  RV_LAST_LOGID = RVFL_FHEAD_SET_TDE_ALGORITHM,
+  RV_LAST_LOGID = RVFL_LOB_DIR_DESTROY,
 
   RV_NOT_DEFINED = 999
 } LOG_RCVINDEX;
@@ -268,6 +269,7 @@ extern void rv_check_rvfuns (void);
    || (idx) == RVBT_MVCC_INCREMENTS_UPD \
    || (idx) == RVPGBUF_FLUSH_PAGE \
    || (idx) == RVFL_DESTROY \
+   || (idx) == RVFL_LOB_DIR_DESTROY \
    || (idx) == RVFL_ALLOC \
    || (idx) == RVFL_DEALLOC \
    || (idx) == RVVAC_NOTIFY_DROPPED_FILE \
