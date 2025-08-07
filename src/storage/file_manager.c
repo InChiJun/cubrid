@@ -11945,6 +11945,7 @@ file_lob_dir_remove (const char *path)
 void
 xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode)
 {
+#if defined(SERVER_MODE)
   THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
   LOG_DATA_ADDR addr = LOG_DATA_ADDR_INITIALIZER;
   // THREAD_ENTRY *thread_p = get_thread_entry ();
@@ -11985,6 +11986,7 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
       file_lob_dir_remove (dirbuf);
       break;
   }
+#endif
 }
 
 /*
