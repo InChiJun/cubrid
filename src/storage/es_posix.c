@@ -112,18 +112,18 @@ es_get_unique_name (char *dirname1, char *dirname2, const char *metaname, char *
  * es_posix_make_dirs -
  *
  * return: error code, ER_ES_GENERAL or NO_ERROR
- * dirname1(in): first level directory name
+ * dirname(in): first level directory name
  * dirname2(in): second level directory name
  */
 static int
-es_make_dirs (const char *dirname1, const char *dirname2)
+es_make_dirs (const char *dirname, const char *dirname2)
 {
   char dirbuf[PATH_MAX];
   int ret;
 
 #if defined (CUBRID_OWFS_POSIX_TWO_DEPTH_DIRECTORY)
 retry:
-  if (snprintf (dirbuf, PATH_MAX - 1, "%s%c%s%c%s", es_base_dir, PATH_SEPARATOR, dirname1, PATH_SEPARATOR, dirname2)
+  if (snprintf (dirbuf, PATH_MAX - 1, "%s%c%s%c%s", es_base_dir, PATH_SEPARATOR, dirname, PATH_SEPARATOR, dirname2)
       < 0)
     {
       assert (false);
@@ -132,7 +132,7 @@ retry:
   ret = mkdir (dirbuf, 0755);
   if (ret < 0 && errno == ENOENT)
     {
-      n = snprintf (dirbuf, PATH_MAX - 1, "%s%c%s", es_base_dir, PATH_SEPARATOR, dirname1);
+      n = snprintf (dirbuf, PATH_MAX - 1, "%s%c%s", es_base_dir, PATH_SEPARATOR, dirname);
       ret = mkdir (dirbuf, 0755);
       if (ret == 0 || errno == EEXIST)
 	{
@@ -140,7 +140,7 @@ retry:
 	}
     }
 #else
-  if (snprintf (dirbuf, PATH_MAX - 1, "%s%c%s", es_base_dir, PATH_SEPARATOR, dirname1) < 0)
+  if (snprintf (dirbuf, PATH_MAX - 1, "%s%c%s", es_base_dir, PATH_SEPARATOR, dirname) < 0)
     {
       assert (false);
       return ER_ES_INVALID_PATH;
@@ -337,13 +337,12 @@ retry:
 #else
   /* default */
   // n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname1, PATH_SEPARATOR, filename);
-#if defined (CS_MODE) /* server */
+ /* server mode 구분 방법 알아내고 매크로 붙이자. */
   THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
-  n = snprintf (dirname, NAME_MAX, "%d_%d_%d%c%s%c%s", thread_p->lobid->hfid.vfid.volid, thread_p->lobid->hfid.vfid.fileid, thread_p->lobid->hfid.hpgid,
+  n = snprintf (dirname, NAME_MAX, "%d_%d_%d%c%s%c%s", thread_p->lob_id.hfid.vfid.volid, thread_p->lob_id.hfid.vfid.fileid, thread_p->lob_id.hfid.hpgid,
                                                     PATH_SEPARATOR, dirname1); // (volid_fileid_hpgid)/ces.xxx
   n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname, PATH_SEPARATOR, filename); // (volid_fileid_hpgid)/ces.xxx/file
 
-#else /* client */
 #endif
   if (n < 0)
     {
