@@ -327,7 +327,7 @@ xes_posix_create_file (char *new_path)
 {
   int fd;
   int ret, n;
-  char dirname1[NAME_MAX], dirname2[NAME_MAX], filename[NAME_MAX];
+  char dirname[NAME_MAX], dirname1[NAME_MAX], dirname2[NAME_MAX], filename[NAME_MAX];
 
 retry:
   es_get_unique_name (dirname1, dirname2, "ces_temp", filename);
@@ -336,7 +336,14 @@ retry:
 		dirname2, PATH_SEPARATOR, filename);
 #else
   /* default */
-  n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname1, PATH_SEPARATOR, filename);
+  // n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname1, PATH_SEPARATOR, filename);
+#if defined (CS_MODE) /* server */
+  THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
+  n = snprintf (dirname, NAME_MAX, "%d_%d_%d%c%s%c%s", thread_p->lobid->hfid.vfid.volid, thread_p->lobid->hfid.vfid.fileid, thread_p->lobid->hfid.hpgid,
+                                                    PATH_SEPARATOR, dirname1); // (volid_fileid_hpgid)/ces.xxx
+  n = snprintf (new_path, PATH_MAX - 1, "%s%c%s", dirname, PATH_SEPARATOR, filename); // (volid_fileid_hpgid)/ces.xxx/file
+
+#else /* client */
 #endif
   if (n < 0)
     {
@@ -355,7 +362,7 @@ retry:
     {
       if (errno == ENOENT)
 	{
-	  ret = es_make_dirs (dirname1, dirname2);
+	  ret = es_make_dirs (dirname, dirname2);
 	  if (ret != NO_ERROR)
 	    {
 	      return ret;

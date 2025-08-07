@@ -12331,7 +12331,15 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 	  for (regu_list = insert->valptr_lists[i]->valptrp, vallist = xasl->val_list->valp, k = num_default_expr;
 	       k < val_no; k++, regu_list = regu_list->next, vallist = vallist->next)
 	    {
+              int type_id = (int) regu_list->value.domain->type->id;
 	      regu_list->value.flags |= REGU_VARIABLE_STRICT_TYPE_CAST;
+
+              if (type_id == DB_TYPE_CLOB || type_id == DB_TYPE_BLOB)
+                {
+                  thread_p->lob_id.hfid = class_hfid;
+                  thread_p->lob_id.attrid = attr_info.values[k].attrid;
+                }
+
 	      if (fetch_peek_dbval (thread_p, &regu_list->value, &xasl_state->vd, &class_oid, NULL, NULL, &valp) !=
 		  NO_ERROR)
 		{
