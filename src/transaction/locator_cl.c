@@ -5923,7 +5923,7 @@ locator_remove_class (MOP class_mop)
   if (insts_hfid->vfid.fileid != NULL_FILEID)
     {
       error_code = heap_destroy_newly_created (insts_hfid, &class_mop->oid_info.oid);
-      error_code = manage_lob_dir (insts_hfid, NULL, 0, LOB_DIR_DROP);
+      error_code = manage_lob_dir (insts_hfid, NULL, 0, LOB_TABLE_DROP);
       if (error_code != NO_ERROR)
 	{
 	  goto error;

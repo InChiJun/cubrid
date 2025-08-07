@@ -11959,7 +11959,7 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
       sprintf (dirbuf, "%s/%s", es_base_dir, rv_path); // es_base_dir/fileid_volid_pgid
       mkdir (dirbuf, 0755);
       // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
-    case LOB_DIR_ADD:
+    case LOB_COLUMN_ADD:
       for (int i = 0; i < lob_arr_length; i++)
         {
           sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[i]);
@@ -11969,19 +11969,13 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
         }
       break;
 
-    case LOB_DIR_DROP:
-      if (attrid_arr) // DROP COLUMN
-        {
-          sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
-          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
-        }
-      else // DROP TABLE
-        {
-          sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
-          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
-        }
-
-      file_lob_dir_remove (dirbuf);
+    case LOB_TABLE_DROP:
+      sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
+      // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
+      break;
+    case LOB_COLUMN_DROP:
+      sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
+      // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
       break;
   }
 }
