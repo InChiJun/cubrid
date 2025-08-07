@@ -11978,7 +11978,8 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
       else // DROP TABLE
         {
           sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
-          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
+          log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
+          // log_append_postpone (thread_p, RVFL_DESTROY, &addr, sizeof (VFID), &hfid->vfid);
         }
 
       file_lob_dir_remove (dirbuf);
