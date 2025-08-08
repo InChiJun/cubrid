@@ -11945,7 +11945,6 @@ file_lob_dir_remove (const char *path)
 void
 xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANAGE_MODE mode)
 {
-#if defined(SERVER_MODE)
   THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
   LOG_DATA_ADDR addr = LOG_DATA_ADDR_INITIALIZER;
   // THREAD_ENTRY *thread_p = get_thread_entry ();
@@ -11959,14 +11958,14 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
       sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
       sprintf (dirbuf, "%s/%s", es_base_dir, rv_path); // es_base_dir/fileid_volid_pgid
       mkdir (dirbuf, 0755);
-      // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
+      log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
     case LOB_DIR_ADD:
       for (int i = 0; i < lob_arr_length; i++)
         {
           sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[i]);
           sprintf (dirbuf, "%s/%s", es_base_dir, rv_path); // es_base_dir/fileid_volid_pgid/attrid
           mkdir (dirbuf, 0755);
-          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
+          log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
         }
       break;
 
@@ -11974,19 +11973,17 @@ xmanage_lob_dir (HFID * hfid, int * attrid_arr, int lob_arr_length, LOB_DIR_MANA
       if (attrid_arr) // DROP COLUMN
         {
           sprintf (rv_path, "%d_%d_%d/%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid, attrid_arr[0]);
-          // log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
+          log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, sizeof (max_lob_path), rv_path);
         }
       else // DROP TABLE
         {
           sprintf (rv_path, "%d_%d_%d", hfid->vfid.volid, hfid->vfid.fileid, hfid->hpgid);
           log_append_postpone (thread_p, RVFL_LOB_DIR_DESTROY, &addr, max_lob_path, rv_path);
-          // log_append_postpone (thread_p, RVFL_DESTROY, &addr, sizeof (VFID), &hfid->vfid);
         }
 
       file_lob_dir_remove (dirbuf);
       break;
   }
-#endif
 }
 
 /*
@@ -12013,7 +12010,7 @@ file_lob_rv_destroy (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
 
   char lob_path[PATH_MAX];
 
-  sprintf(lob_path, "%s%s", es_base_dir, path);
+  sprintf(lob_path, "%s/%s", es_base_dir, path);
 
   error_code = file_lob_dir_remove (lob_path);
 

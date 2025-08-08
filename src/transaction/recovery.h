@@ -260,6 +260,7 @@ extern void rv_check_rvfuns (void);
 #define RCV_IS_LOGICAL_RUN_POSTPONE_MANUAL(idx) \
   ((idx) == RVFL_DEALLOC \
    || (idx) == RVHF_MARK_DELETED \
+   || (idx) == RVFL_LOB_DIR_DESTROY \
    || (idx) == RVBT_DELETE_OBJECT_POSTPONE)
 
 #define RCV_IS_LOGICAL_LOG(vpid, idx) \
@@ -269,7 +270,6 @@ extern void rv_check_rvfuns (void);
    || (idx) == RVBT_MVCC_INCREMENTS_UPD \
    || (idx) == RVPGBUF_FLUSH_PAGE \
    || (idx) == RVFL_DESTROY \
-   || (idx) == RVFL_LOB_DIR_DESTROY \
    || (idx) == RVFL_ALLOC \
    || (idx) == RVFL_DEALLOC \
    || (idx) == RVVAC_NOTIFY_DROPPED_FILE \
