@@ -484,7 +484,8 @@ struct json_t;
            (n)->info.expr.op == PT_LE || \
            (n)->info.expr.op == PT_GT_INF || \
            (n)->info.expr.op == PT_LT_INF || \
-           (n)->info.expr.op == PT_RANGE ))
+           (n)->info.expr.op == PT_RANGE || \
+           (n)->info.expr.op == PT_BETWEEN))
 
 #define PT_IS_EXPR_NODE_WITH_NON_PUSHABLE(n) \
         ( (PT_IS_EXPR_NODE (n)) && \
@@ -965,7 +966,10 @@ enum pt_custom_print
   PT_PRINT_SUPPRESS_SERIAL_CONV = (0x1 << 26),
   /* suppress print various generated functions including suppress delete targe for dblink */
   PT_PRINT_SUPPRESS_FOR_DBLINK = (0x1 << 27),
-  PT_PRINT_HOST_VAR_COUNT = (0x1 << 28)
+  PT_PRINT_HOST_VAR_COUNT = (0x1 << 28),
+  PT_PRINT_DBLINK_INFO = (0x1 << 29),	/* If you use DBLINK, specify it when generating the SHA hash value. */
+  /* print lower case */
+  PT_PRINT_LOWER = (0x1 << 30)
 };
 
 /* all statement node types should be assigned their API statement enumeration */
@@ -1371,47 +1375,57 @@ typedef enum
 } PT_JOIN_TYPE;
 
 typedef UINT64 PT_HINT_ENUM;
-#define  PT_HINT_NONE  0x00ULL	/* no hint */
-#define  PT_HINT_ORDERED  0x01ULL	/* force join left-to-right */
-#define  PT_HINT_NO_INDEX_SS  0x02ULL	/* disable index skip scan */
-#define  PT_HINT_INDEX_SS  0x04ULL	/* enable index skip scan */
-#define  PT_HINT_SELECT_BTREE_NODE_INFO  0x08ULL	/* SELECT b-tree node information */
-#define  PT_HINT_USE_NL  0x10ULL	/* force nl-join */
-#define  PT_HINT_USE_IDX  0x20ULL	/* force idx-join */
-#define  PT_HINT_USE_MERGE  0x40ULL	/* force m-join */
-#define  PT_HINT_USE_HASH  0x80ULL	/* force hash-join */
-#define  PT_HINT_RECOMPILE  0x0100ULL	/* recompile */
-#define  PT_HINT_LK_TIMEOUT  0x0200ULL	/* lock_timeout */
-#define  PT_HINT_NO_LOGGING  0x0400ULL	/* no_logging */
-#define  PT_HINT_NO_HASH_LIST_SCAN  0x0800ULL	/* no hash list scan */
-#define  PT_HINT_QUERY_CACHE  0x1000ULL	/* query_cache */
-#define  PT_HINT_REEXECUTE  0x2000ULL	/* reexecute */
-#define  PT_HINT_JDBC_CACHE  0x4000ULL	/* jdbc_cache */
-#define  PT_HINT_USE_SBR  0x8000ULL	/* statement based replication */
-#define  PT_HINT_USE_IDX_DESC  0x10000ULL	/* descending index scan */
-#define  PT_HINT_NO_COVERING_IDX  0x20000ULL	/* do not use covering index scan */
-#define  PT_HINT_INSERT_MODE  0x40000ULL	/* set insert_executeion_mode */
-#define  PT_HINT_NO_IDX_DESC  0x80000ULL	/* do not use descending index scan */
-#define  PT_HINT_NO_MULTI_RANGE_OPT  0x100000ULL	/* do not use multi range optimization */
-#define  PT_HINT_USE_UPDATE_IDX  0x200000ULL	/* use index for merge update */
-#define  PT_HINT_USE_INSERT_IDX  0x400000ULL	/* do not generate SORT-LIMIT plan */
-#define  PT_HINT_NO_SORT_LIMIT  0x800000ULL
-#define  PT_HINT_NO_HASH_AGGREGATE  0x1000000ULL	/* no hash aggregate evaluation */
-#define  PT_HINT_SKIP_UPDATE_NULL  0x2000000ULL
-#define  PT_HINT_NO_INDEX_LS  0x4000000ULL	/* disable loose index scan */
-#define  PT_HINT_INDEX_LS  0x8000000ULL	/* enable loose index scan */
-#define  PT_HINT_NO_SUPPLEMENTAL_LOG  0x10000000ULL	/* Used in DML (only for update delete currently) to avoid adding DML supplemental logs that may be duplicated by DDL */
-#define  PT_HINT_SELECT_RECORD_INFO  0x20000000ULL	/* SELECT record info from tuple header instead of data */
-#define  PT_HINT_SELECT_PAGE_INFO  0x40000000ULL	/* SELECT page header information from heap file instead of record data */
-#define  PT_HINT_SELECT_KEY_INFO  0x80000000ULL	/* SELECT key information from index b-tree instead of table record data */
-#define  PT_HINT_QUERY_NO_CACHE  0x100000000ULL	/* don't use the query cache (unused) */
-#define  PT_HINT_NO_PUSH_PRED  0x200000000ULL	/* do not push predicates */
-#define  PT_HINT_NO_MERGE  0x400000000ULL	/* do not merge view or in-line view */
-#define  PT_HINT_NO_ELIMINATE_JOIN  0x800000000ULL	/* do not eliminate join */
-#define  PT_HINT_SAMPLING_SCAN  0x1000000000ULL	/* SELECT sampling data instead of full data */
-#define  PT_HINT_LEADING  0x2000000000ULL	/* force specific table to join left-to-right */
-#define  PT_HINT_NO_SUBQUERY_CACHE 0x4000000000ULL	/* don't use the subquery result cache */
-#define  PT_HINT_NO_USE_HASH  0x8000000000ULL	/* disable hash-join */
+#define  PT_HINT_NONE				(0ULL      )	/* no hint */
+#define  PT_HINT_ORDERED			(1ULL <<  0)	/* force join left-to-right */
+#define  PT_HINT_NO_INDEX_SS			(1ULL <<  1)	/* disable index skip scan */
+#define  PT_HINT_INDEX_SS			(1ULL <<  2)	/* enable index skip scan */
+#define  PT_HINT_SELECT_BTREE_NODE_INFO		(1ULL <<  3)	/* SELECT b-tree node information */
+#define  PT_HINT_USE_NL				(1ULL <<  4)	/* force nl-join */
+#define  PT_HINT_USE_IDX			(1ULL <<  5)	/* force idx-join */
+#define  PT_HINT_USE_MERGE			(1ULL <<  6)	/* force m-join */
+#define  PT_HINT_USE_HASH			(1ULL <<  7)	/* force hash-join */
+#define  PT_HINT_RECOMPILE			(1ULL <<  8)	/* recompile */
+#define  PT_HINT_LK_TIMEOUT			(1ULL <<  9)	/* lock_timeout */
+#define  PT_HINT_NO_LOGGING			(1ULL << 10)	/* no_logging */
+#define  PT_HINT_NO_HASH_LIST_SCAN		(1ULL << 11)	/* no hash list scan */
+#define  PT_HINT_QUERY_CACHE			(1ULL << 12)	/* query_cache */
+#define  PT_HINT_REEXECUTE			(1ULL << 13)	/* reexecute */
+#define  PT_HINT_JDBC_CACHE			(1ULL << 14)	/* jdbc_cache */
+#define  PT_HINT_USE_SBR			(1ULL << 15)	/* statement based replication */
+#define  PT_HINT_USE_IDX_DESC			(1ULL << 16)	/* descending index scan */
+#define  PT_HINT_NO_COVERING_IDX		(1ULL << 17)	/* do not use covering index scan */
+#define  PT_HINT_INSERT_MODE			(1ULL << 18)	/* set insert_executeion_mode */
+#define  PT_HINT_NO_IDX_DESC			(1ULL << 19)	/* do not use descending index scan */
+#define  PT_HINT_NO_MULTI_RANGE_OPT		(1ULL << 20)	/* do not use multi range optimization */
+#define  PT_HINT_USE_UPDATE_IDX			(1ULL << 21)	/* use index for merge update */
+#define  PT_HINT_USE_INSERT_IDX			(1ULL << 22)	/* do not generate SORT-LIMIT plan */
+#define  PT_HINT_NO_SORT_LIMIT			(1ULL << 23)
+#define  PT_HINT_NO_HASH_AGGREGATE		(1ULL << 24)	/* no hash aggregate evaluation */
+#define  PT_HINT_SKIP_UPDATE_NULL		(1ULL << 25)
+#define  PT_HINT_NO_INDEX_LS			(1ULL << 26)	/* disable loose index scan */
+#define  PT_HINT_INDEX_LS			(1ULL << 27)	/* enable loose index scan */
+#define  PT_HINT_NO_SUPPLEMENTAL_LOG		(1ULL << 28)	/* Used in DML (only for update delete currently) to avoid adding DML supplemental logs that may be duplicated by DDL */
+#define  PT_HINT_SELECT_RECORD_INFO		(1ULL << 29)	/* SELECT record info from tuple header instead of data */
+#define  PT_HINT_SELECT_PAGE_INFO		(1ULL << 30)	/* SELECT page header information from heap file instead of record data */
+#define  PT_HINT_SELECT_KEY_INFO		(1ULL << 31)	/* SELECT key information from index b-tree instead of table record data */
+#define  PT_HINT_QUERY_NO_CACHE			(1ULL << 32)	/* don't use the query cache (unused) */
+#define  PT_HINT_NO_PUSH_PRED			(1ULL << 33)	/* do not push predicates */
+#define  PT_HINT_NO_MERGE			(1ULL << 34)	/* do not merge view or in-line view */
+#define  PT_HINT_NO_ELIMINATE_JOIN		(1ULL << 35)	/* do not eliminate join */
+#define  PT_HINT_SAMPLING_SCAN			(1ULL << 36)	/* SELECT sampling data instead of full data */
+#define  PT_HINT_LEADING			(1ULL << 37)	/* force specific table to join left-to-right */
+#define  PT_HINT_NO_SUBQUERY_CACHE		(1ULL << 38)	/* don't use the subquery result cache */
+#define  PT_HINT_NO_USE_HASH			(1ULL << 39)	/* disable hash-join */
+#define  PT_HINT_NO_PARALLEL_HEAP_SCAN		(1ULL << 40)	/* disable parallel heap scan */
+#define  PT_HINT_PARALLEL			(1ULL << 41)	/* parallel query execution threads */
+#define  PT_HINT_INLINE_CTE			(1ULL << 42)	/* inline CTE */
+#define  PT_HINT_MATERIALIZE_CTE		(1ULL << 43)	/* materialize CTE */
+#define  PT_HINT_NO_PARALLEL_SUBQUERY		(1ULL << 44)	/* disable parallel subquery */
+#define  PT_HINT_NO_PARALLEL_HASH_JOIN		(1ULL << 45)	/* disable parallel hash join */
+
+/* Parallel query execution threads limits */
+#define  PT_MAX_PARALLEL_THREADS  64
+#define  PT_MIN_PARALLEL_THREADS  0
 
 /* Codes for error messages */
 typedef enum
@@ -1744,7 +1758,9 @@ typedef enum
   PT_SPEC_FLAG_MVCC_ASSIGN_REEV = 0x800,	/* the spec is used in UPDATE assignment reevaluation */
   PT_SPEC_FLAG_DOESNT_HAVE_UNIQUE = 0x1000,	/* the spec was checked and does not have any uniques */
   PT_SPEC_FLAG_SAMPLING_SCAN = 0x2000,	/* spec for sampling scan */
-  PT_SPEC_FLAG_REFERENCED_AT_ODKU = 0x4000	/* spec for odku assignment */
+  PT_SPEC_FLAG_REFERENCED_AT_ODKU = 0x4000,	/* spec for odku assignment */
+  PT_SPEC_FLAG_NO_PARALLEL_HEAP_SCAN = 0x8000,	/* spec for not for parallel heap scan */
+  PT_SPEC_FLAG_PARALLEL_THREAD = 0x10000	/* spec for setted number of parallel query execution threads */
 } PT_SPEC_FLAG;
 
 typedef enum
@@ -1928,6 +1944,7 @@ struct semantic_chk_info
   int Oracle_outerjoin_path_num;	/* Oracle style outer join check */
   bool donot_fold;		/* false - off, true - on */
   bool system_class;		/* system class(es) is(are) referenced */
+  bool has_dblink;
 };
 
 struct nested_view_version_info
@@ -2202,6 +2219,8 @@ struct pt_cte_info
   PT_NODE *recursive_part;	/* a recursive subquery */
   PT_MISC_TYPE only_all;	/* Type of UNION between non-recursive and recursive parts */
   void *xasl;			/* xasl proc pointer */
+  int referenced_count;		/* The number of times the CTE is referenced */
+  bool is_materialized;
 };
 
 /* CREATE SERIAL INFO */
@@ -2301,6 +2320,7 @@ struct pt_delete_info
   PT_NODE *del_stmt_list;	/* list of DELETE statements after split */
   PT_HINT_ENUM hint;		/* hint flag */
   PT_NODE *with;		/* PT_WITH_CLAUSE */
+  int num_parallel_threads;	/* number of parallel threads */
   unsigned has_trigger:1;	/* whether it has triggers */
   unsigned server_delete:1;	/* whether it can be server-side deletion */
   unsigned rewrite_limit:1;	/* need to rewrite the limit clause */
@@ -2382,6 +2402,7 @@ struct pt_spec_info
   bool natural;			/* -- does not support natural join */
   DB_AUTH auth_bypass_mask;	/* flag to bypass normal authorization : used only by SHOW statements currently */
   PT_SPEC_FLAG flag;		/* flag wich marks this spec for DELETE or UPDATE operations */
+  int num_parallel_threads;	/* number of parallel threads for this spec */
 };
 
 /* Info for an EVALUATE object */
@@ -2461,7 +2482,7 @@ struct pt_expr_info
 
 #define PT_EXPR_INFO_GROUPBYNUM_LIMIT 32768	/* flag that marks if the expression resulted from a GROUP BY ... LIMIT
 						 * statement */
-#define PT_EXPR_INFO_DO_NOT_AUTOPARAM 65536	/* don't auto parameterize expr at qo_do_auto_parameterize() */
+#define PT_EXPR_INFO_DO_NOT_AUTOPARAM 65536	/* don't auto parameterize expr at qo_auto_parameterize() */
 #define PT_EXPR_INFO_CAST_WRAP 	131072	/* 0x20000, CAST is wrapped by compiling */
 #define PT_EXPR_INFO_ROWNUM_ONLY 262144	/* 0x40000, rownum only predicate */
 #define PT_EXPR_INFO_SP_NUMERIC 524288	/* 0x80000, CAST as NUMERIC for SP */
@@ -2953,6 +2974,7 @@ struct pt_select_info
   PT_HINT_ENUM hint;
   int flavor;
   int flag;			/* flags */
+  int num_parallel_threads;
   PT_CONNECT_BY_CHECK_CYCLES check_cycles;	/* CONNECT BY CHECK CYCLES */
   unsigned single_table_opt:1;	/* hq optimized for single table */
 };
@@ -3126,6 +3148,7 @@ struct pt_update_info
   PT_NODE *orderby_for;		/* PT_EXPR */
   PT_HINT_ENUM hint;		/* hint flag */
   PT_NODE *with;		/* PT_WITH_CLAUSE */
+  int num_parallel_threads;	/* number of parallel threads */
   unsigned has_trigger:1;	/* whether it has triggers */
   unsigned has_unique:1;	/* whether there's unique constraint */
   unsigned server_update:1;	/* whether it can be server-side update */
@@ -3193,6 +3216,8 @@ struct pt_merge_info
   PT_NODE *check_where;		/* check option */
   PT_NODE *waitsecs_hint;	/* lock timeout in seconds */
   PT_HINT_ENUM hint;		/* hint flag */
+  PT_NODE *no_use_hash;		/* NO_USE_HASH hint's arguments (PT_NAME list) */
+  PT_NODE *use_hash;		/* USE_HASH hint's arguments (PT_NAME list) */
 #define PT_MERGE_INFO_HAS_UNIQUE  1	/* has unique constraints */
 #define PT_MERGE_INFO_SERVER_OP	  2	/* server side operation */
 #define PT_MERGE_INFO_INSERT_ONLY 4	/* merge condition always false */
@@ -3845,7 +3870,7 @@ struct parser_node
     unsigned is_hidden_column:1;
     unsigned is_paren:1;
     unsigned with_rollup:1;	/* WITH ROLLUP clause for GROUP BY */
-    unsigned force_auto_parameterize:1;	/* forces a call to qo_do_auto_parameterize (); this is a special flag used for
+    unsigned force_auto_parameterize:1;	/* forces a call to qo_auto_parameterize (); this is a special flag used for
 					 * processing ON DUPLICATE KEY UPDATE */
     unsigned do_not_fold:1;	/* disables constant folding on the node */
     unsigned is_cnf_start:1;
@@ -3998,6 +4023,7 @@ struct parser_context
   REMOTE_COLS *dblink_remote;	/* for dblink, remote column list */
 
   HIDE_PWD_INFO hide_pwd_info;
+  PARSER_VARCHAR *dblink_server_text;	/* Contains access information to be used in generating SHA hash values ​​when using the Server name in DBLINK. */
 
   struct
   {
@@ -4027,6 +4053,7 @@ struct parser_context
     unsigned is_parsing_static_sql:1;	/* For PL/CSQL's static SQL: parameterize PL/CSQL variable symbols (to host variable) */
     unsigned is_parsing_unload_schema:1;	/* Parsing in unload: used to parse the scode (original query) of PL/CSQL to remove the owner. */
     unsigned is_parsing_trigger:1;
+    unsigned is_skip_auto_parameterize:1;	/* set to 1 when skip auto parameterize, now only used for merge xasl generation */
   } flag;
 };
 

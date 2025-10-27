@@ -1540,7 +1540,8 @@ ldr_find_class_by_query (const char *name, char *buf, int buf_size)
   if (!DB_IS_NULL (&value))
     {
       assert (STATIC_CAST (int, strlen (db_get_string (&value))) < buf_size);
-      strncpy (buf, db_get_string (&value), buf_size);
+      strncpy (buf, db_get_string (&value), buf_size -1);
+      buf[buf_size -1] = '\0';
     }
   else
     {
@@ -2740,7 +2741,7 @@ ldr_str_db_char (LDR_CONTEXT *context, const char *str, size_t len, SM_ATTRIBUTE
   val.data.ch.medium.size = (int) len;
   val.data.ch.medium.buf = (char *) str;
   val.data.ch.medium.compressed_buf = NULL;
-  val.data.ch.medium.compressed_size = 0;
+  val.data.ch.medium.compressed_size = DB_NOT_YET_COMPRESSED;
   mem = context->mobj + att->offset;
   CHECK_ERR (err, att->domain->type->setmem (mem, att->domain, &val));
   OBJ_SET_BOUND_BIT (context->mobj, att->storage_order);
@@ -2811,7 +2812,7 @@ ldr_str_db_varchar (LDR_CONTEXT *context, const char *str, size_t len, SM_ATTRIB
   val.data.ch.info.is_max_string = false;
   val.data.ch.info.compressed_need_clear = false;
   val.data.ch.medium.compressed_buf = NULL;
-  val.data.ch.medium.compressed_size = 0;
+  val.data.ch.medium.compressed_size = DB_NOT_YET_COMPRESSED;
 
   mem = context->mobj + att->offset;
   CHECK_ERR (err, att->domain->type->setmem (mem, att->domain, &val));
@@ -4998,7 +4999,7 @@ ldr_act_init_context (LDR_CONTEXT *context, const char *class_name, size_t len)
 	      ldr_abort ();
 	      goto error_exit;
 	    }
-	  strncpy (context->class_name, class_name, len);
+	  memcpy (context->class_name, class_name, len);
 	  context->class_name[len] = '\0';
 
 	  if (is_internal_class (context->cls))
@@ -6359,7 +6360,7 @@ ldr_sa_load (load_args *args, int *status, bool *interrupted)
   int defaults = 0;
   int fails = 0;
   int64_t lastcommit = 0;
-  bool is_emptyfile = false;
+  volatile  bool is_emptyfile = false;
   int ldr_init_ret = NO_ERROR;
 
   std::ifstream object_file (args->object_file);
