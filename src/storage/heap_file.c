@@ -2341,6 +2341,9 @@ OR_CLASSREP *
 heap_classrepr_get (THREAD_ENTRY * thread_p, const OID * class_oid, RECDES * class_recdes, REPR_ID reprid,
 		    int *idx_incache)
 {
+  /* 전역 heap_Classrepr 엔트리에서 class_oid에 맞는 엔트리가 있는 찾아보고
+     있으면 엔트리에서 reprid(in), idx_incache(in) 값 찾아서 설정해주고, 엔트리에서 reprid에 해당하는 repr 반환.
+  */
   HEAP_CLASSREPR_ENTRY *cache_entry;
   HEAP_CLASSREPR_HASH *hash_anchor;
   OR_CLASSREP *repr = NULL;
@@ -2359,8 +2362,8 @@ search_begin:
 
   for (cache_entry = hash_anchor->hash_next; cache_entry != NULL; cache_entry = cache_entry->hash_next)
     {
-      if (OID_EQ (class_oid, &cache_entry->class_oid))
-	{
+      if (OID_EQ (class_oid, &cache_entry->class_oid)) // 전달된 class_oid와 전역 엔트리의 class_oid가 일치하다면
+	{ // 전역 class_oid 엔트리에서 원하는 class_oid를 찾은 상태
 	  r = pthread_mutex_trylock (&cache_entry->mutex);
 	  if (r == 0)
 	    {
@@ -2390,7 +2393,7 @@ search_begin:
 	}
     }
 
-  if (cache_entry == NULL)
+  if (cache_entry == NULL) // 위 전역 엔트리에서 원하는 class_oid를 찾지 못했다면
     {
       if (repr_from_record == NULL)
 	{
@@ -2571,19 +2574,19 @@ search_begin:
       heap_classrepr_log_stack ("heap_classrepr_get %d|%d|%d add repr %p to cache_entry %p", OID_AS_ARGS (class_oid),
 				repr, cache_entry);
     }
-  else
+  else // 위 전역 엔트리에서 원하는 class_oid를 찾았다면
     {
       /* now, we have already cache_entry for class_oid. if it contains repr info for reprid, return it. else load
        * classrepr info for it */
       assert (!cache_entry->force_decache);
 
-      if (reprid == NULL_REPRID)
+      if (reprid == NULL_REPRID) // 파라미터로 전달된 reprid가 null(-1)이라면 전역 엔트리에서 last_reprid 할당
 	{
 	  reprid = cache_entry->last_reprid;
 	}
 
       if (reprid <= NULL_REPRID || reprid > cache_entry->last_reprid || reprid > cache_entry->max_reprid)
-	{
+	{ // 여긴 해당될 일 없음
 	  assert (false);
 
 	  pthread_mutex_unlock (&cache_entry->mutex);
@@ -2593,7 +2596,7 @@ search_begin:
 	}
 
       /* reprid cannot be greater than cache_entry->last_reprid. */
-      repr = cache_entry->repr[reprid];
+      repr = cache_entry->repr[reprid]; // repr에 전역 엔트리의 repr 할당
       if (repr == NULL)
 	{
 	  /* load repr. info. for reprid of class_oid */
@@ -2621,8 +2624,8 @@ search_begin:
 	    }
 	}
 
-      cache_entry->fcnt++;
-      *idx_incache = cache_entry->idx;
+      cache_entry->fcnt++; // 전역 엔트리 fix 카운트 증가
+      *idx_incache = cache_entry->idx; // index를 전역 엔트리에 있는 인덱스 값으로 할당
     }
   pthread_mutex_unlock (&cache_entry->mutex);
 
@@ -9876,7 +9879,7 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    * attribute values and the class attribute values.
    */
 
-  attr_info->last_classrepr =
+  attr_info->last_classrepr = // NULL_REPRID을 전달하면서 전역 엔트리에서 class_oid에 해당하는 엔트리 찾고, last_classrepr 반환
     heap_classrepr_get (thread_p, &attr_info->class_oid, NULL, NULL_REPRID, &attr_info->last_cacheindex);
   if (attr_info->last_classrepr == NULL)
     {
