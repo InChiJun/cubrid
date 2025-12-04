@@ -9891,9 +9891,9 @@ heap_attrinfo_start (THREAD_ENTRY * thread_p, const OID * class_oid, int request
    * representation.
    */
 
-  if (requested_num_attrs < 0)
+  if (requested_num_attrs < 0) // requested_num_attrs가 -1이면
     {
-      requested_num_attrs = attr_info->last_classrepr->n_attributes;
+      requested_num_attrs = attr_info->last_classrepr->n_attributes; // requested_num_attrs = 전체 컬럼 개수
     }
   else if (requested_num_attrs >
 	   (attr_info->last_classrepr->n_attributes + attr_info->last_classrepr->n_shared_attrs +
