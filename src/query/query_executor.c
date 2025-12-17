@@ -12730,8 +12730,8 @@ qexec_execute_insert (THREAD_ENTRY * thread_p, XASL_NODE * xasl, XASL_STATE * xa
 		      continue;
 		    }
 		}
-	      rc = heap_attrinfo_set (NULL, insert->att_id[k], insert->vals[k], &attr_info);
-	      if (rc != NO_ERROR)
+	      rc = heap_attrinfo_set (NULL, insert->att_id[k], insert->vals[k], &attr_info); // 전달하는 att_id, value로 attr_info->values[k].value 설정
+	      if (rc != NO_ERROR)           // 이미 att_id, db_value가 정해져 있음.
 		{
 		  GOTO_EXIT_ON_ERROR;
 		}
