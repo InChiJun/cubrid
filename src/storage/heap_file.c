@@ -367,9 +367,9 @@ struct heap_classrepr_cache
   int num_entries;
   HEAP_CLASSREPR_ENTRY *area;
   int num_hash;
-  HEAP_CLASSREPR_HASH *hash_table;
-  HEAP_CLASSREPR_LOCK *lock_table;
-  HEAP_CLASSREPR_LRU_LIST LRU_list;
+  HEAP_CLASSREPR_HASH *hash_table; class_oid로 엔트리 탐색
+  HEAP_CLASSREPR_LOCK *lock_table; class_oid에 대해 생성하려고 접근하고 있음을 표시하기 위한 테이블
+  HEAP_CLASSREPR_LRU_LIST LRU_list; free_list에 엔트리가 부족하면 
   HEAP_CLASSREPR_FREE_LIST free_list;
   HFID rootclass_hfid;
 #ifdef DEBUG_CLASSREPR_CACHE
@@ -1513,13 +1513,14 @@ heap_classrepr_initialize_cache (void)
   heap_Classrepr_cache.LRU_list.LRU_bottom = NULL;
 
   /* initialize free list */
-  pthread_mutex_init (&heap_Classrepr_cache.free_list.free_mutex, NULL); // free_list가 뭐하는지는 모르겠는데 mutex 잡을 때 free인 리스트를 활용하는듯
+  pthread_mutex_init (&heap_Classrepr_cache.free_list.free_mutex, NULL); // free_list가 뭐하는지는 모르겠는데 mutex 잡을 때 free인 리스트를 활용하는듯(heap_classrepr_entry_alloc() 함수 참고)
   heap_Classrepr_cache.free_list.free_top = &heap_Classrepr_cache.area[0];
   heap_Classrepr_cache.free_list.free_cnt = heap_Classrepr_cache.num_entries;
 
   heap_Classrepr = &heap_Classrepr_cache;
 
   return ret;
+  
 
 exit_on_error:
 
