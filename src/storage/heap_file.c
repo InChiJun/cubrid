@@ -20568,7 +20568,7 @@ heap_insert_adjust_recdes_header (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEX
   assert (insert_context->type == HEAP_OPERATION_INSERT);
   assert (insert_context->recdes_p != NULL);
 
-  record_size = insert_context->recdes_p->length;
+  record_size = insert_context->recdes_p->length; // context에 있는 length
 
   repid_and_flag_bits = OR_GET_MVCC_REPID_AND_FLAG (insert_context->recdes_p->data);
   mvcc_flags = (repid_and_flag_bits >> OR_MVCC_FLAG_SHIFT_BITS) & OR_MVCC_FLAG_MASK;
@@ -23475,7 +23475,7 @@ heap_create_update_context (HEAP_OPERATION_CONTEXT * context, HFID * hfid_p, OID
  *         moment.
  */
 int
-heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, PGBUF_WATCHER * home_hint_p)
+heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, PGBUF_WATCHER * home_hint_p) // 일반적인 insert 케이스에는 home_hint_p가 NULL임. 다른 케이스는 NULL이 아닐 수 있음(TODO)
 {
   bool is_mvcc_op;
   int rc = NO_ERROR;
@@ -23494,13 +23494,13 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   HEAP_PERF_START (thread_p, context);
 
   /* check scancache */
-  if (heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p) !=
+  if (heap_scancache_check_with_hfid (thread_p, &context->hfid, &context->class_oid, &context->scan_cache_p) != // debug_initpattern이 잘 되어 있는지 확인, scan_cache->hfid/class_oid가 맞는지 체크. 안 맞으면 다시 세팅
       NO_ERROR)
     {
       return ER_FAILED;
     }
 
-  is_mvcc_class = !mvcc_is_mvcc_disabled_class (&context->class_oid);
+  is_mvcc_class = !mvcc_is_mvcc_disabled_class (&context->class_oid); // mvcc 관련된거라 잘 모르겠음. 시간 있으면 보자
   /*
    * Determine type of operation
    */
@@ -23520,7 +23520,7 @@ heap_insert_logical (THREAD_ENTRY * thread_p, HEAP_OPERATION_CONTEXT * context, 
   /*
    * Record header adjustments
    */
-  if (!OID_ISNULL (&context->class_oid) && !OID_IS_ROOTOID (&context->class_oid)
+  if (!OID_ISNULL (&context->class_oid) && !OID_IS_ROOTOID (&context->class_oid) // context->class_oid가 NULL이 아니고, rootoid가 아니면
       && context->recdes_p->type != REC_ASSIGN_ADDRESS)
     {
       if (heap_insert_adjust_recdes_header (thread_p, context, is_mvcc_class) != NO_ERROR)
