@@ -19524,7 +19524,7 @@ heap_get_class_oid_from_page (THREAD_ENTRY * thread_p, PAGE_PTR page_p, OID * cl
   RECDES chain_recdes;
   HEAP_CHAIN *chain;
 
-  if (spage_get_record (thread_p, page_p, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS) // page의 첫 번째 slot 반환
+  if (spage_get_record (thread_p, page_p, HEAP_HEADER_AND_CHAIN_SLOTID, &chain_recdes, PEEK) != S_SUCCESS) // page의 첫 번째 slot을 chain_recdes에 반환
     {
       assert (0);
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_GENERIC_ERROR, 0);
@@ -19951,11 +19951,11 @@ heap_get_header_page (THREAD_ENTRY * thread_p, const HFID * hfid, VPID * header_
  */
 int
 heap_scancache_quick_start_root_hfid (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_cache)
-{
+{ // scan_cache에 root_hfid 적용하고, 나머지 필드 초기화
   HFID root_hfid;
 
-  (void) boot_find_root_heap (&root_hfid); // root_hfid 찾아주는듯
-  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // hfid를 scan_cache->node.hfid에 적용. 나머지 초기화
+  (void) boot_find_root_heap (&root_hfid); // root_hfid 찾아줌
+  (void) heap_scancache_quick_start_internal (scan_cache, &root_hfid); // root_hfid를 scan_cache->node.hfid에 적용. 나머지 초기화
   scan_cache->page_latch = S_LOCK; // heap_scancache_quick_start_internal()에서도 page_latch를 S_LOCK로 해줌
 
   return NO_ERROR;
