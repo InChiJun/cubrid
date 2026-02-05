@@ -5749,7 +5749,7 @@ error_return:
 int
 or_header_size (char *ptr)
 {
-  return mvcc_header_size_lookup[OR_GET_MVCC_FLAG (ptr)];
+  return mvcc_header_size_lookup[OR_GET_MVCC_FLAG (ptr)]; // header에 어떤 정보까지 기재했는지 여부에 따라 size 반환(mvcc_delid or prev_lsa가 없는 경우 등등 각 사이즈가 결정되는 케이스가 다름)
 }
 
 #if defined(ENABLE_UNUSED_FUNCTION)

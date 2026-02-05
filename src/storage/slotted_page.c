@@ -1931,7 +1931,7 @@ spage_insert_at (THREAD_ENTRY * thread_p, PAGE_PTR page_p, PGSLOTID slot_id, REC
     }
 
   status =
-    spage_find_empty_slot_at (thread_p, page_p, slot_id, record_descriptor_p->length, record_descriptor_p->type,
+    spage_find_empty_slot_at (thread_p, page_p, slot_id, record_descriptor_p->length, record_descriptor_p->type, // 파라미터로 준 slot_id가 이미 만들어진 slot인지 새로 만들어야 하는 slot인지 여부 확인해서 반환
 			      &slot_p);
   if (status == SP_SUCCESS)
     {

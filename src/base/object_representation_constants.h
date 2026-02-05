@@ -162,10 +162,10 @@
 
 /* The following flags are used for dynamic MVCC information */
 /* The record contains MVCC insert id */
-#define OR_MVCC_FLAG_VALID_INSID	  0x01
+#define OR_MVCC_FLAG_VALID_INSID	  0x01 // 0001
 
 /* The record contains MVCC delete id. If not set, the record contains chn */
-#define OR_MVCC_FLAG_VALID_DELID	  0x02
+#define OR_MVCC_FLAG_VALID_DELID	  0x02 // 0010
 
 /* The record have an LSA with the location of the previous version */
 #define OR_MVCC_FLAG_VALID_PREV_VERSION   0x04

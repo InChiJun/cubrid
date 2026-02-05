@@ -479,11 +479,11 @@ OR_PUT_DOUBLE (char *ptr, double val)
 #define OR_CHN_OFFSET (OR_REP_OFFSET + OR_MVCC_REP_SIZE)
 #define OR_CHN_SIZE 4
 
-#define OR_MVCC_INSERT_ID_OFFSET (OR_CHN_OFFSET + OR_CHN_SIZE)
+#define OR_MVCC_INSERT_ID_OFFSET (OR_CHN_OFFSET + OR_CHN_SIZE) // INSERT_OFFSET은 무조건 chn 다음으로 시작됨
 #define OR_MVCC_INSERT_ID_SIZE 8
 
 #define OR_MVCC_DELETE_ID_OFFSET(mvcc_flags) \
-  (OR_MVCC_INSERT_ID_OFFSET + (((mvcc_flags) & OR_MVCC_FLAG_VALID_INSID) ? OR_MVCC_INSERT_ID_SIZE : 0))
+  (OR_MVCC_INSERT_ID_OFFSET + (((mvcc_flags) & OR_MVCC_FLAG_VALID_INSID) ? OR_MVCC_INSERT_ID_SIZE : 0)) // mvcc_flag에 INSERTID가 존재하면 INSERTID 시작 위치부터 8바이트 +된 위치가 DELID 시작지점
 #define OR_MVCC_DELETE_ID_SIZE 8
 
 #define OR_MVCC_PREV_VERSION_LSA_OFFSET(mvcc_flags) \
@@ -625,10 +625,10 @@ OR_PUT_DOUBLE (char *ptr, double val)
   (OR_GET_BOUND_BIT_FLAG (obj) && !OR_GET_BOUND_BIT (OR_GET_BOUND_BITS (obj, nvars, fsize), position))
 
 #define OR_ENABLE_BOUND_BIT(bitptr, element) \
-  *OR_GET_BOUND_BIT_BYTE (bitptr, element) = *OR_GET_BOUND_BIT_BYTE (bitptr, element) | OR_BOUND_BIT_MASK (element)
+  *OR_GET_BOUND_BIT_BYTE (bitptr, element) = *OR_GET_BOUND_BIT_BYTE (bitptr, element) | OR_BOUND_BIT_MASK (element) // bitmap에서 bit 활성화
 
 #define OR_CLEAR_BOUND_BIT(bitptr, element) \
-  *OR_GET_BOUND_BIT_BYTE (bitptr, element) = *OR_GET_BOUND_BIT_BYTE (bitptr, element) & ~OR_BOUND_BIT_MASK (element)
+  *OR_GET_BOUND_BIT_BYTE (bitptr, element) = *OR_GET_BOUND_BIT_BYTE (bitptr, element) & ~OR_BOUND_BIT_MASK (element) // bitmap에서 bit 비활성화
 
 /* SET HEADER */
 
@@ -1028,9 +1028,9 @@ union \
 typedef struct or_buf OR_BUF;
 struct or_buf
 {
-  char *buffer;
-  char *ptr;
-  char *endptr;
+  char *buffer; // data 시작 포인터(?)
+  char *ptr; // data 시작 포인터(?)
+  char *endptr; // buf data가 담긴 전체 레코드의 끝 포인터
   struct or_fixup *fixups;
 };
 
@@ -1429,8 +1429,8 @@ STATIC_INLINE void or_multi_put_size_offset (char *nullmap_ptr, const int n_elem
 STATIC_INLINE void
 or_init (OR_BUF * buf, char *data, int length)
 {
-  buf->buffer = data;
-  buf->ptr = data;
+  buf->buffer = data; // data 시작지점
+  buf->ptr = data; // data 시작지점
 
   /* TODO: LP64 check DB_INT32_MAX */
   if (length <= 0 || length == DB_INT32_MAX)
@@ -1439,7 +1439,7 @@ or_init (OR_BUF * buf, char *data, int length)
     }
   else
     {
-      buf->endptr = data + length;
+      buf->endptr = data + length; // data 끝지점
     }
 
   buf->fixups = NULL;
@@ -1679,10 +1679,10 @@ or_get_short (OR_BUF * buf, int *error)
 STATIC_INLINE int
 or_put_int (OR_BUF * buf, int num)
 {
-  ASSERT_ALIGN (buf->ptr, INT_ALIGNMENT);
+  ASSERT_ALIGN (buf->ptr, INT_ALIGNMENT); // align 맞춰주고
   assert (buf->ptr + OR_INT_SIZE <= buf->endptr);
-  OR_PUT_INT (buf->ptr, num);
-  buf->ptr += OR_INT_SIZE;
+  OR_PUT_INT (buf->ptr, num); // buf->ptr에 int 사이즈 만큼의 공간을 num으로 할당(작성)한다.
+  buf->ptr += OR_INT_SIZE; // buf->ptr이 작성한 공간 다음 주소를 가리키게 한다.
   return NO_ERROR;
 }
 

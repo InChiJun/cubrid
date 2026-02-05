@@ -145,7 +145,7 @@ IS_INVALID_PRECISION (int p, int m)
  */
 int
 db_value_domain_init (DB_VALUE * value, const DB_TYPE type, const int precision, const int scale)
-{
+{ // dbvalue의 값을 제외한 type 같은 것들을 설정해줌
   int error = NO_ERROR;
 
   CHECK_1ARG_ERROR (value);
