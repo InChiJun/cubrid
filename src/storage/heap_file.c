@@ -1271,8 +1271,7 @@ heap_scan_pb_lock_and_fetch_debug (THREAD_ENTRY * thread_p, const VPID * vpid_pt
       else
 	{
 	  assert (scan_cache->page_latch > NULL_LOCK);
-	  page_lock = lock_Conv[scan_cache->page_latch][lock]; // lock 전역변수에서 lock정보를 얻어오나 봄. 자세히 모르겠음
-	  assert (page_lock != NA_LOCK);
+	  page_lock = lock_conv (scan_cache->page_latch, lock); // lock 전역변수에서 lock정보를 얻어오나 봄. 자세히 모르겠음
 	}
     }
   else
@@ -2044,7 +2043,7 @@ heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_a
 
 	  thread_lock_entry (cur_thrd_entry); // [질문] heap에 불필요한 질문이지만, 내 thread를 왜 lock하는거지?
 	  pthread_mutex_unlock (&hash_anchor->hash_mutex);
-	  thread_suspend_and_unlock_entry (cur_thrd_entry, THREAD_HEAP_CLSREPR_SUSPENDED); // t1이 끝나고 me_thread 차례가 올 때까지 대기
+	  thread_suspend_wakeup_and_unlock_entry (cur_thrd_entry, THREAD_HEAP_CLSREPR_SUSPENDED); // t1이 끝나고 me_thread 차례가 올 때까지 대기
           // thread_..._unlock_entry() 함수에서는 wakeup 컨디션까지(사용 가능한 상태가 될 때까지) 대기해서 내가 사용할 수 있게 설정하고 나옴
 
 	  if (cur_thrd_entry->resume_status == THREAD_HEAP_CLSREPR_RESUMED)
@@ -6870,6 +6869,7 @@ heap_scancache_start_internal (THREAD_ENTRY * thread_p, HEAP_SCANCACHE * scan_ca
 		      break;
 		    }
 		  target_thread_p = target_thread_p->m_px_orig_thread_entry;
+		  assert (target_thread_p != thread_p);
 		}
 	      assert (target_thread_p != NULL);
 	      pthread_mutex_lock (&target_thread_p->m_px_lock_mutex);

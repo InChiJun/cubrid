@@ -3188,14 +3188,26 @@ file_create_temp_internal (THREAD_ENTRY * thread_p, int npages, FILE_TYPE ftype,
 
   if (VFID_ISNULL (&tempcache_entry->vfid))
     {
+      int tran_index = file_get_tempcache_entry_index (thread_p);
+      FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index];
+
       FILE_TABLESPACE_FOR_TEMP_NPAGES (&tablespace, npages);
+
+      /* file_create() internally calls log_sysop_start().
+       * log_sysop_start() uses a transaction-level mutex (rmutex_topop) that does not
+       * support concurrent access from multiple worker threads sharing the same transaction. */
+      file_tempcache_lock_tran_entry (tran_entry);
       error_code = file_create (thread_p, ftype, &tablespace, NULL, true, is_numerable, vfid_out);
+      file_tempcache_unlock_tran_entry (tran_entry);
+
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
+
 	  file_tempcache_retire_entry (tempcache_entry);
 	  return error_code;
 	}
+
       tempcache_entry->vfid = *vfid_out;
     }
   else
@@ -4450,6 +4462,22 @@ int
 file_temp_retire_preserved (THREAD_ENTRY * thread_p, const VFID * vfid)
 {
   return file_temp_retire_internal (thread_p, vfid, true);
+}
+
+int
+file_temp_truncate (THREAD_ENTRY * thread_p, const VFID * vfid)
+{
+  int error_code = NO_ERROR;
+  if (vfid == NULL || VFID_ISNULL (vfid))
+    {
+      return NO_ERROR;
+    }
+  error_code = file_temp_reset_user_pages (thread_p, vfid);
+  if (error_code != NO_ERROR)
+    {
+      assert (false);
+    }
+  return error_code;
 }
 
 /*
