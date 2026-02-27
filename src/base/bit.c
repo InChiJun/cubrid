@@ -574,14 +574,14 @@ bool
 bit64_is_set (UINT64 i, int off)
 {
   assert (off >= 0 && off < 64);
-  return (i & (((UINT64) 1) << off)) != 0;
+  return (i & (((UINT64) 1) << off)) != 0; // off의 비트가 1로 표기되어 있는지 확인해서 반환
 }
 
 UINT64
 bit64_set (UINT64 i, int off)
 {
   assert (off >= 0 && off < 64);
-  i |= ((UINT64) 1) << off;
+  i |= ((UINT64) 1) << off; // off의 비트를 1로 표기
   return i;
 }
 

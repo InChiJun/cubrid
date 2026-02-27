@@ -2033,21 +2033,22 @@ heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_a
 	}
     }
   cur_thrd_entry = thread_p;
- // 정확히는 모르겠지만, hash_anchor에서 같은 class_oid_lock에 대해 대기하는 모든 스레드를 먼저 다 끝내주고 lock 주도권 획득
-  for (cur_lock_entry = hash_anchor->lock_next; cur_lock_entry != NULL; cur_lock_entry = cur_lock_entry->lock_next)
-    { // hash_anchor에 같은 class_oid를 대기 중인 스레드 엔트리를 꺼냄(대기중인 엔트리 예시: class_oid_lock->t1->t2->NULL)
-      if (OID_EQ (&cur_lock_entry->class_oid, class_oid))
+
+  for (cur_lock_entry = hash_anchor->lock_next; cur_lock_entry != NULL; cur_lock_entry = cur_lock_entry->lock_next) // hash_anchor의 대기중인 lock을 순회
+    {
+      if (OID_EQ (&cur_lock_entry->class_oid, class_oid)) // hash_anchor에 같은 class_oid를 대기 중인 lock_entry를 찾았으면
 	{
-	  cur_thrd_entry->next_wait_thrd = cur_lock_entry->next_wait_thrd; // me_thread->t1
-	  cur_lock_entry->next_wait_thrd = cur_thrd_entry; // 정확히는 모르겠지만 me_thread->t1->me_thread 이렇게 내 다음 순서로 두는 것 같음
+	  cur_thrd_entry->next_wait_thrd = cur_lock_entry->next_wait_thrd; // 현재 스레드의 대기 리스트를 lock_entry의 대기하는 다음 스레드 리스트로 할당
+                                                                          // lock_entry를 현재 스레드가 사용할 것이기 때문에, 현재 스레드 사용 이후에는 lock_entry에 대기하는 스레드들이 정상 실행되도록 리스트를 형성함
+	  cur_lock_entry->next_wait_thrd = cur_thrd_entry; // lock_entry의 바로 다음 순번을 현재 스레드로 할당
 
 	  thread_lock_entry (cur_thrd_entry); // [질문] heap에 불필요한 질문이지만, 내 thread를 왜 lock하는거지?
 	  pthread_mutex_unlock (&hash_anchor->hash_mutex);
-	  thread_suspend_wakeup_and_unlock_entry (cur_thrd_entry, THREAD_HEAP_CLSREPR_SUSPENDED); // t1이 끝나고 me_thread 차례가 올 때까지 대기
+	  thread_suspend_wakeup_and_unlock_entry (cur_thrd_entry, THREAD_HEAP_CLSREPR_SUSPENDED); // lock_entry를 잡고 진행중인 스레드가 task를 마치고 날 깨워주길 대기함
           // thread_..._unlock_entry() 함수에서는 wakeup 컨디션까지(사용 가능한 상태가 될 때까지) 대기해서 내가 사용할 수 있게 설정하고 나옴
 
 	  if (cur_thrd_entry->resume_status == THREAD_HEAP_CLSREPR_RESUMED)
-	    { // 같은 class_oid를 대기중인 엔트리가 끝났다면 내 차례가 됐으므로 다시 시도하도록 리턴
+	    { // 같은 class_oid를 사용중인 lock_entry가 끝났다면 내 차례가 됐으므로 다시 시도하도록 리턴
 	      return NEED_TO_RETRY;	/* traverse hash chain again */
 	    }
 	  else
@@ -2058,7 +2059,7 @@ heap_classrepr_lock_class (THREAD_ENTRY * thread_p, HEAP_CLASSREPR_HASH * hash_a
 	    }
 	}
     }
-
+ // 결국 위에서 class_oid에 대한 lock_entry를 획득하지 못했다면 새로 등록해줌
   cur_lock_entry = &heap_Classrepr->lock_table[cur_thrd_entry->index]; // 전역 classrepr->lock_table에서 내 thread index로 배열 위치 찾음
                                                                       // thread_index로 lock_table 차지한다면 lock_table에는 중복된 class_oid를 가진 엔트리가 존재할 수 있음
   cur_lock_entry->class_oid = *class_oid; // 현재 class_oid 설정
@@ -2369,12 +2370,12 @@ search_begin:
     {                                                                                                   // [추측] hash_anchor는 여러 class_oid entry를 묶어둔 버킷. hash_next는 그 엔트리여서 원하는 class_oid를 찾는 것 같음
       if (OID_EQ (class_oid, &cache_entry->class_oid)) // 전달된 class_oid와 전역 엔트리의 class_oid가 일치하다면
 	{ // 전역 class_oid 엔트리에서 원하는 class_oid를 찾은 상태
-	  r = pthread_mutex_trylock (&cache_entry->mutex); // mutex_lock 작업
-	  if (r == 0)
+	  r = pthread_mutex_trylock (&cache_entry->mutex); // mutex_lock 시도. 실패하면 대기 안 하고 그냥 반환
+	  if (r == 0) // 위에서 mutex lock 성공했으면
 	    {
-	      pthread_mutex_unlock (&hash_anchor->hash_mutex); // class_oid를 찾았으면 전역 heap_Classrepr에서 뮤텍스 해제
+	      pthread_mutex_unlock (&hash_anchor->hash_mutex); // class_oid를 찾았으면 전역 heap_Classrepr의 hash_anchor에 대해서 뮤텍스 해제
 	    }
-	  else
+	  else // 위에서 mutex lock 실패했으면
 	    {
 	      if (r != EBUSY)
 		{
@@ -2384,13 +2385,13 @@ search_begin:
 		  goto exit;
 		}
 	      /* if cache_entry lock is busy. release hash mutex lock and lock cache_entry lock unconditionally */
-	      pthread_mutex_unlock (&hash_anchor->hash_mutex);
-	      r = pthread_mutex_lock (&cache_entry->mutex);
+	      pthread_mutex_unlock (&hash_anchor->hash_mutex); // hash_anchor에 대해 lock 해제
+	      r = pthread_mutex_lock (&cache_entry->mutex); // mutex lock 시도. 무한 대기로 시도함
 	    }
 	  /* check if cache_entry is used by others */
-	  if (!OID_EQ (class_oid, &cache_entry->class_oid))
+	  if (!OID_EQ (class_oid, &cache_entry->class_oid)) // mutex를 잡고 보니 entry의 class_oid 정보가 바뀌었다면
 	    {
-	      pthread_mutex_unlock (&cache_entry->mutex);
+	      pthread_mutex_unlock (&cache_entry->mutex); // entry mutex 해제하고 다시 처음부터
 	      goto search_begin;
 	    }
 

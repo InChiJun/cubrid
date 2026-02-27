@@ -6157,7 +6157,7 @@ exit:
  */
 int
 disk_compare_vsids (const void *first, const void *second)
-{
+{ // 1순위.volid / 2순위.sectid 기준으로 오름차순 정렬
   VSID *first_vsid = (VSID *) first;
   VSID *second_vsid = (VSID *) second;
 

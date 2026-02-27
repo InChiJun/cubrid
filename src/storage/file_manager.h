@@ -98,7 +98,7 @@ typedef struct file_btree_des FILE_BTREE_DES;
 struct file_btree_des
 {
   OID class_oid;
-  int attr_id;
+  int attr_id; // btree descriptor에 attr_id가 지정됨. [질문] 여러개 인덱스 컬럼이 있으면 file_des에는 여러개의 attr_id가 붙을까?
 };
 
 /* Overflow key file descriptor */
