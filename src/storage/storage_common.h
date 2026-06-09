@@ -116,7 +116,7 @@ extern PGLENGTH db_User_page_size;
 #define SECTOR_LAST_PAGEID(sid) ((((sid) + 1) * DISK_SECTOR_NPAGES) - 1)
 #define SECTOR_FROM_PAGEID(pageid) ((pageid) / DISK_SECTOR_NPAGES) // [질문] 왜 pageid에서 sector를 얻어오려면 나누기 64를 해야 할까?
                                                                   // [추측] sector는 64개씩 할당되므로 64개씩 끊어져서 id가 관리되는듯. ex) 56page / 64 = 0 || 67page / 64 = 1
-#define VSID_FROM_VPID(vsid, vpid) (vsid)->volid = (vpid)->volid; (vsid)->sectid = SECTOR_FROM_PAGEID ((vpid)->pageid)
+#define VSID_FROM_VPID(vsid, vpid) (vsid)->volid = (vpid)->volid; (vsid)->sectid = SECTOR_FROM_PAGEID ((vpid)->pageid) // volid + pageid로 vsid 완성
 #define VSID_IS_SECTOR_OF_VPID(vsid, vpid) \
   ((vsid)->volid == (vpid)->volid && (vsid)->sectid == SECTOR_FROM_PAGEID ((vpid)->pageid))
 

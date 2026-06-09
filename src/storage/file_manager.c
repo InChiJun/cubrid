@@ -127,8 +127,8 @@ struct file_header
    * components: the last page of partially allocated sectors and the offset to last sector in this page.
    * When the sector becomes full, the cursor is incremented. When all page becomes full, the cursor is moved to next
    * page. */
-  VPID vpid_last_temp_alloc;	/* VPID of partial table page last used to allocate a page. */
-  int offset_to_last_temp_alloc;	/* Sector offset in partial table last used to allocate a page. */
+  VPID vpid_last_temp_alloc;	/* VPID of partial table page last used to allocate a page. */ // temp 파일에서만 사용되는 필드값
+  int offset_to_last_temp_alloc;	/* Sector offset in partial table last used to allocate a page. */ // temp_file의 ftab에서 마지막으로 페이지를 할당한 섹터의 인덱스를 나타냄
 
   /* Numerable files */
   /* Numerable files have an additional property compared to regular files. The order of user page allocation is
@@ -279,8 +279,8 @@ typedef UINT64 FILE_ALLOC_BITMAP;
 typedef struct file_partial_sector FILE_PARTIAL_SECTOR;
 struct file_partial_sector
 {
-  VSID vsid;			/* Important - VSID must be first member of FILE_PARTIAL_SECTOR. Sometimes, the
-				 * FILE_PARTIAL_SECTOR pointers in file table are reinterpreted as VSID. */
+  VSID vsid;			/* Important - VSID must be first member of FILE_PARTIAL_SECTOR. Sometimes, the // FILE_PARTIAL_SECTOR 구조체의 첫 멤버변수가 VSID여야 하고 그 이유는 FILE_PARTIAL_SECTOR를 포인터로 참조할 때 바로 VSID로 캐스팅하는 경우가 많다는 내용임
+				 * FILE_PARTIAL_SECTOR pointers in file table are reinterpreted as VSID. */     // [refactor] FILE_PARTIAL_SECTOR를 VSID로 캐스팅해서 참조한다는 이유로 첫 멤버 변수를 제한하는 것은 부적절하므로, VSID로 캐스팅하여 참조하는 코드 삭제할 필요가 있음
   FILE_ALLOC_BITMAP page_bitmap;
 };
 #define FILE_PARTIAL_SECTOR_INITIALIZER { VSID_INITIALIZER, 0 }
@@ -469,7 +469,7 @@ struct file_find_nth_context
 /************************************************************************/
 /* Temporary cache section                                              */
 /************************************************************************/
-typedef struct file_tempcache_entry FILE_TEMPCACHE_ENTRY;
+typedef struct file_tempcache_entry FILE_TEMPCACHE_ENTRY; // 각 entry에는 vfid가 고정되어 있음. 재사용 시 새로 file을 생성하지 않고 그 vfid를 사용함
 struct file_tempcache_entry
 {
   VFID vfid;
@@ -495,22 +495,22 @@ struct file_tempcache
   int nfree_entries_max;
   int nfree_entries;
 
-  FILE_TEMPCACHE_ENTRY *cached_not_numerable;	/* cached temporary files */
-  FILE_TEMPCACHE_ENTRY *cached_numerable;	/* cached temporary numerable files */
-  int ncached_max;
-  int ncached_not_numerable;
-  int ncached_numerable;
+  FILE_TEMPCACHE_ENTRY *cached_not_numerable;	/* cached temporary files */ // 사용이 끝난 not_numerable temp_file의 엔트리가 이 리스트에 caching되어 있음
+  FILE_TEMPCACHE_ENTRY *cached_numerable;	/* cached temporary numerable files */ // 사용이 끝난 numerable temp_file의 엔트리가 이 리스트에 caching되어 있음
+  int ncached_max; // file_Tempcache에 caching할 수 있는 최대 개수
+  int ncached_not_numerable; // not_numerable temp file 개수
+  int ncached_numerable; // numerable temp file 개수
 
   pthread_mutex_t mutex;
 #if !defined (NDEBUG)
-  int owner_mutex;
+  int owner_mutex; // 몇 번 인덱스의 트랜잭션이 mutex를 소유하고 있는지 표기
 #endif				/* !NDEBUG */
 
   FILE_TEMPCACHE_TRAN_ENTRY *tran_files;	/* transaction temporary files */
 
   /* space info */
-  SPACEDB_FILES spacedb_temp;
-};
+  SPACEDB_FILES spacedb_temp; // temp 파일 만들 때마다 여기의 필드값들을 하나씩 늘려주거나 설정해주고, 사용자가 spacedb를 실행하면 temp file 정보를 한 번에 띄워주는 것 같음
+};                            // [추측] 왜 tempcache를 냅두고 spacedb를 위한 구조체를 따로 만드냐? tempcache는 전역 변수이기 때문에 다른 애들이 많이 노리고 있고, 통계만을 위한 구조체가 아니기 때문에 통계를 위한 필드값을 따로 빼놓는 것 같음
 
 static FILE_TEMPCACHE file_Tempcache;
 
@@ -1392,7 +1392,7 @@ file_rv_header_update_mark_deleted (THREAD_ENTRY * thread_p, LOG_RCV * rcv)
  */
 STATIC_INLINE int
 file_header_copy (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_HEADER * fhead_copy)
-{
+{ // fhead_copy에 vfid의 포인터 복사
   VPID vpid_fhead;
   PAGE_PTR page_fhead = NULL;
   FILE_HEADER *fhead = NULL;
@@ -1684,7 +1684,7 @@ file_extdata_at (const FILE_EXTENSIBLE_DATA * extdata, int index)
  */
 STATIC_INLINE bool
 file_extdata_can_merge (const FILE_EXTENSIBLE_DATA * extdata_src, const FILE_EXTENSIBLE_DATA * extdata_dest)
-{
+{ // extdata_dest의 수용 가능한 item 수가 src의 item 개수만큼 충분한지 체크
   return file_extdata_remaining_capacity (extdata_dest) >= extdata_src->n_items;
 }
 
@@ -1712,10 +1712,10 @@ file_extdata_merge_unordered (const FILE_EXTENSIBLE_DATA * extdata_src, FILE_EXT
 STATIC_INLINE void
 file_extdata_merge_ordered (const FILE_EXTENSIBLE_DATA * extdata_src, FILE_EXTENSIBLE_DATA * extdata_dest,
 			    int (*compare_func) (const void *, const void *))
-{
+{ // 아래 로직이 복잡하지만, 결국 extdata_src의 item들을 extdata_dest에 순서 맞춰서 넣어줌
   char *dest_ptr;
   char *dest_end_ptr;
-  const char *src_ptr;
+  const char *src_ptr; // [refactor] 다른 변수도 마찬가지지만, src_ptr이라 하면 어떤 src인지 모름. src_extdata_ptr 이런식으로 표현해주는게 좋을 듯
   const char *src_end_ptr;
   const char *src_new_ptr;
   int memsize = 0;
@@ -1728,30 +1728,30 @@ file_extdata_merge_ordered (const FILE_EXTENSIBLE_DATA * extdata_src, FILE_EXTEN
   /* safe guard: destination has enough capacity to include all source items. */
   assert (file_extdata_remaining_capacity (extdata_dest) >= file_extdata_item_count (extdata_src));
 
-  src_ptr = (const char *) file_extdata_start (extdata_src);
-  src_end_ptr = (const char *) file_extdata_end (extdata_src);
+  src_ptr = (const char *) file_extdata_start (extdata_src); // extdata_src 시작지점
+  src_end_ptr = (const char *) file_extdata_end (extdata_src); // extdata_src 끝지점
 
-  dest_ptr = (char *) file_extdata_start (extdata_dest);
-  dest_end_ptr = (char *) file_extdata_end (extdata_dest);
+  dest_ptr = (char *) file_extdata_start (extdata_dest); // extdata_dest 시작지점
+  dest_end_ptr = (char *) file_extdata_end (extdata_dest); // extdata_dest 끝지점
 
   /* advance source and destination pointers based on item order. Stop when end of destination is reached. */
-  while (dest_ptr < dest_end_ptr)
+  while (dest_ptr < dest_end_ptr) // extdata_dest의 모든 item 순회
     {
       /* collect all items from source that are smaller than current destination item. */
-      for (src_new_ptr = src_ptr; src_new_ptr < src_end_ptr; src_new_ptr += extdata_src->size_of_item)
+      for (src_new_ptr = src_ptr; src_new_ptr < src_end_ptr; src_new_ptr += extdata_src->size_of_item) // src의 item들 순회
 	{
 	  assert (compare_func (src_new_ptr, dest_ptr) != 0);
-	  if (compare_func (src_new_ptr, dest_ptr) > 0)
+	  if (compare_func (src_new_ptr, dest_ptr) > 0) // src의 item이 dest의 item보다 더 크면 찾은거임
 	    {
 	      break;
 	    }
 	}
-      if (src_new_ptr > src_ptr)
+      if (src_new_ptr > src_ptr) // src의 item 중 하나라면
 	{
 	  /* move to dest_ptr */
-	  memsize = (int) (src_new_ptr - src_ptr);
+	  memsize = (int) (src_new_ptr - src_ptr); // merge할 item 사이즈
 	  /* make room for new data */
-	  memmove (dest_ptr + memsize, dest_ptr, dest_end_ptr - dest_ptr);
+	  memmove (dest_ptr + memsize, dest_ptr, dest_end_ptr - dest_ptr); // dest에서 item들 밀어내고 src item 삽입
 	  memcpy (dest_ptr, src_ptr, memsize);
 
 	  dest_ptr += memsize;
@@ -1761,14 +1761,14 @@ file_extdata_merge_ordered (const FILE_EXTENSIBLE_DATA * extdata_src, FILE_EXTEN
 
 	  assert (dest_end_ptr <= debug_dest_end_ptr);
 	}
-      if (src_ptr >= src_end_ptr)
+      if (src_ptr >= src_end_ptr) // src의 item을 모두 순회해서 더 순회할 게 없다면
 	{
 	  /* source extensible data was consumed. */
 	  assert (src_ptr == src_end_ptr);
 	  break;
 	}
       /* skip all items from destination smaller than current source item */
-      for (; dest_ptr < dest_end_ptr; dest_ptr += extdata_dest->size_of_item)
+      for (; dest_ptr < dest_end_ptr; dest_ptr += extdata_dest->size_of_item) // dest의 item들 중 src의 item 보다 작은 item은 건너뛰고, 건너뛴 위치로 dest_ptr 시작지점 설정
 	{
 	  assert (compare_func (src_ptr, dest_ptr) != 0);
 	  if (compare_func (src_ptr, dest_ptr) <= 0)
@@ -2532,10 +2532,10 @@ file_extdata_merge_pages (THREAD_ENTRY * thread_p, const FILE_EXTENSIBLE_DATA * 
   assert (!ordered || compare_func != NULL);
   assert (log_check_system_op_is_started (thread_p));
 
-  if (!file_extdata_can_merge (extdata_src, extdata_dest))
+  if (!file_extdata_can_merge (extdata_src, extdata_dest)) // 합치려는 extdata에 수용 공간이 충분한지 체크
     {
       /* not enough space */
-      return false;
+      return false; // 공간이 부족하면 실패
     }
 
   save_lsa = *pgbuf_get_lsa (page_dest);
@@ -2581,7 +2581,7 @@ file_extdata_merge_pages (THREAD_ENTRY * thread_p, const FILE_EXTENSIBLE_DATA * 
  * page_first (in)    : first extensible data page
  * item (in)          : item to find
  * compare_func (in)  : compare function
- * ordered (in)       : true if each extensible data page is ordered
+ * ordered (in)       : true if each extensible data page is ordered // recovery에서 호출되는게 아니라면 ordered 상태임
  * item_pop (out)     : if not NULL it will output the item removed from extensible data.
  * vpid_merged (out)  : output the vpid if merged extensible data page or NULL vpid.
  */
@@ -2589,7 +2589,7 @@ static int
 file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA * extdata_first, PAGE_PTR page_first,
 				   const void *item, int (*compare_func) (const void *, const void *), bool ordered,
 				   void *item_pop, VPID * vpid_merged)
-{
+{ // 현재 extdata의 item을 prev_page에 merge 하거나, next_page의 item들을 현재 extdata의 page에 merge 시도
   PAGE_PTR page_prev = NULL;
   PAGE_PTR page_crt = NULL;
   FILE_EXTENSIBLE_DATA *extdata_prev = NULL;
@@ -2630,7 +2630,7 @@ file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA
       /* search item: do binary search if page is ordered, otherwise iterate through all until matched */
       if (ordered)
 	{
-	  file_extdata_find_ordered (extdata_crt, item, compare_func, &found, &pos);
+	  file_extdata_find_ordered (extdata_crt, item, compare_func, &found, &pos); // 파라미터로 전달된 item을 extdata_crt에서 찾음. found는 찾았는지 여부, pos는 인덱스
 	}
       else
 	{
@@ -2644,32 +2644,32 @@ file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA
 	    }
 	}
 
-      if (found)
-	{
+      if (found) // [질문] found 여부를 조건으로 걸었는데, 위에서 못 찾은 경우가 있을 수 있나?
+	{        // [정답] 아래 코드 보면 found 실패한 경우는 assert(false)임
 	  /* found item. remove it */
 	  assert (pos >= 0 && pos < file_extdata_item_count (extdata_crt));
 
-	  if (item_pop != NULL)
+	  if (item_pop != NULL) // 파라미터 item_pop의 메모리가 할당되어 있는 포인터라면
 	    {
 	      /* output item before removing */
-	      memcpy (item_pop, file_extdata_at (extdata_crt, pos), extdata_crt->size_of_item);
+	      memcpy (item_pop, file_extdata_at (extdata_crt, pos), extdata_crt->size_of_item); // 삭제하려는 item을 itemp_pop에 복사함
 	    }
 
 	  save_lsa = *pgbuf_get_lsa (page_crt);
-	  file_log_extdata_remove (thread_p, extdata_crt, page_crt, pos, 1);
-	  file_extdata_remove_at (extdata_crt, pos, 1);
+	  file_log_extdata_remove (thread_p, extdata_crt, page_crt, pos, 1); // remove했다는 logging
+	  file_extdata_remove_at (extdata_crt, pos, 1); // extdata에서 pos에 있는 item 제거
 
 	  file_log ("file_extdata_find_and_remove_item", "removed extensible data item: \n"
 		    FILE_EXTDATA_MSG ("extensible data") "\t" PGBUF_PAGE_MODIFY_MSG ("extensible data page") "\n"
 		    "\tposition = %d \n", FILE_EXTDATA_AS_ARGS (extdata_crt),
 		    PGBUF_PAGE_MODIFY_ARGS (page_crt, &save_lsa), pos);
 
-	  if (page_prev != NULL)
+	  if (page_prev != NULL) // 지금이 첫 페이지가 아니라면
 	    {
 	      /* try to merge to previous page */
 	      assert (extdata_prev != NULL);
 
-	      if (file_extdata_merge_pages (thread_p, extdata_crt, page_crt, extdata_prev, page_prev, compare_func,
+	      if (file_extdata_merge_pages (thread_p, extdata_crt, page_crt, extdata_prev, page_prev, compare_func, // prev ftab에 merge 시도. 실패 시 통과
 					    ordered))
 		{
 		  pgbuf_get_vpid (page_crt, vpid_merged);
@@ -2678,17 +2678,18 @@ file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA
 		}
 	    }
 	}
-      if (VPID_ISNULL (&extdata_crt->vpid_next))
+      if (VPID_ISNULL (&extdata_crt->vpid_next)) // 현재 extdata의 다음 page가 없으면
 	{
-	  break;
-	}
+	  break; // while문 종료
+	}        // [refactor] while문 종료하는 조건이 너무 문맥상 안 맞는듯. remove할 item을 찾았고, remove를 했고, merge까지 했다면 종료하는게 문맥상 맞을듯
+                 // [re-ply] 과연? 위 refactor가 옳을까?
       if (page_prev != NULL && page_prev != page_first)
 	{
 	  pgbuf_unfix_and_init (thread_p, page_prev);
 	}
       page_prev = page_crt;
       extdata_prev = extdata_crt;
-      page_crt = pgbuf_fix (thread_p, &extdata_prev->vpid_next, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
+      page_crt = pgbuf_fix (thread_p, &extdata_prev->vpid_next, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH); // vpid_next로 이동
       if (page_crt == NULL)
 	{
 	  ASSERT_ERROR_AND_SET (error_code);
@@ -2698,7 +2699,7 @@ file_extdata_find_and_remove_item (THREAD_ENTRY * thread_p, FILE_EXTENSIBLE_DATA
       if (found)
 	{
 	  /* try to merge to previous page */
-	  if (file_extdata_merge_pages (thread_p, extdata_crt, page_crt, extdata_prev, page_prev, compare_func,
+	  if (file_extdata_merge_pages (thread_p, extdata_crt, page_crt, extdata_prev, page_prev, compare_func, // vpid_next로 이동해서 현재 페이지와 merge 시도
 					ordered))
 	    {
 	      pgbuf_get_vpid (page_crt, vpid_merged);
@@ -2774,7 +2775,7 @@ file_extdata_add_item_count (THREAD_ENTRY * thread_p, const FILE_EXTENSIBLE_DATA
  */
 STATIC_INLINE bool
 file_partsect_is_full (FILE_PARTIAL_SECTOR * partsect)
-{
+{ // 섹터의 비트가 모두 활성화되어 있는지 반환
   return partsect->page_bitmap == FILE_FULL_PAGE_BITMAP;
 }
 
@@ -2799,7 +2800,7 @@ file_partsect_is_empty (FILE_PARTIAL_SECTOR * partsect)
  */
 STATIC_INLINE bool
 file_partsect_is_bit_set (FILE_PARTIAL_SECTOR * partsect, int offset)
-{
+{ // offset의 비트가 1로 표기되어 있으면 true 반환
   return bit64_is_set (partsect->page_bitmap, offset);
 }
 
@@ -2863,8 +2864,8 @@ file_partsect_pageid_to_offset (FILE_PARTIAL_SECTOR * partsect, PAGEID pageid)
  */
 STATIC_INLINE bool
 file_partsect_alloc (FILE_PARTIAL_SECTOR * partsect, VPID * vpid_out, int *offset_out)
-{
-  int offset_to_zero = bit64_count_trailing_ones (partsect->page_bitmap); // page_bit에서 0까지의 offset 구함
+{ // sector의 첫 비트부터 순회해서 0번 비트(활성화하지 않은 페이지 비트) 찾아서 활성화하고 vpid_out으로 반환
+  int offset_to_zero = bit64_count_trailing_ones (partsect->page_bitmap); // page_bit에서 할당한 적 없는(0 비트) 비트까지의 offset 구함
 
   if (offset_to_zero >= FILE_ALLOC_BITMAP_NBITS)
     {
@@ -3023,11 +3024,11 @@ file_compare_vfids (const void *first, const void *second)
  */
 static int
 file_compare_track_items (const void *first, const void *second)
-{
+{ // 전달된 first, second의 vfid를 비교하면서 뭐가 더 큰지 반환함(first가 더 크면 양수, second가 더 크면 음수)
   FILE_TRACK_ITEM *first_item = (FILE_TRACK_ITEM *) first;
   FILE_TRACK_ITEM *second_item = (FILE_TRACK_ITEM *) second;
 
-  if (first_item->volid > second_item->volid)
+  if (first_item->volid > second_item->volid) // 1순위로 volid 비교
     {
       return 1;
     }
@@ -3035,7 +3036,7 @@ file_compare_track_items (const void *first, const void *second)
     {
       return -1;
     }
-  return first_item->fileid - second_item->fileid;
+  return first_item->fileid - second_item->fileid; // 2순위로 fileid 비교
 }
 
 /*
@@ -3151,7 +3152,7 @@ file_create_heap (THREAD_ENTRY * thread_p, bool reuse_oid, const OID * class_oid
   /* it's done this way because of annoying Valgrind complaints: */
   memset (&des, 0, sizeof (des));
   /* set class_oid here */
-  des.heap.class_oid = *class_oid;
+  des.heap.class_oid = *class_oid; // fhead에 등록될 descriptor class_oid에 미리 값 지정
   /* hfid will be updated after create */
 
   return file_create_with_npages (thread_p, file_type, 1, &des, vfid);
@@ -3178,7 +3179,7 @@ file_create_temp_internal (THREAD_ENTRY * thread_p, int npages, FILE_TYPE ftype,
 
   assert (npages > 0);
 
-  error_code = file_tempcache_get (thread_p, ftype, is_numerable, &tempcache_entry);
+  error_code = file_tempcache_get (thread_p, ftype, is_numerable, &tempcache_entry); // file_Tempcache.cache에서 entry를 찾아오거나 새로 malloc해서 entry 반환
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -3187,10 +3188,10 @@ file_create_temp_internal (THREAD_ENTRY * thread_p, int npages, FILE_TYPE ftype,
   assert (tempcache_entry != NULL);
   assert (tempcache_entry->ftype == ftype);
 
-  if (VFID_ISNULL (&tempcache_entry->vfid))
+  if (VFID_ISNULL (&tempcache_entry->vfid)) // file_tempcache_get()에서 cache의 file을 가져오지 못하고 free_entries or malloc했다면
     {
-      int tran_index = file_get_tempcache_entry_index (thread_p);
-      FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index];
+      int tran_index = file_get_tempcache_entry_index (thread_p); // tran_index 얻어옴
+      FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index]; // tran_index의 entry 획득
 
       FILE_TABLESPACE_FOR_TEMP_NPAGES (&tablespace, npages);
 
@@ -3211,7 +3212,7 @@ file_create_temp_internal (THREAD_ENTRY * thread_p, int npages, FILE_TYPE ftype,
 
       tempcache_entry->vfid = *vfid_out;
     }
-  else
+  else // cache된 entry를 가져왔다면
     {
       /* we use the cached file */
       /* what about the number of pages? */
@@ -3219,7 +3220,7 @@ file_create_temp_internal (THREAD_ENTRY * thread_p, int npages, FILE_TYPE ftype,
     }
 
   /* save to transaction temporary file list */
-  file_tempcache_push_tran_file (thread_p, tempcache_entry);
+  file_tempcache_push_tran_file (thread_p, tempcache_entry); // tran_files[tran_index]에 생성한 tempcache_entry 삽입(push)
   return NO_ERROR;
 }
 
@@ -3371,7 +3372,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
   assert (vfid != NULL);
 
   /* Estimate the required size including file header & tables. */
-  total_size = tablespace->initial_size;
+  total_size = tablespace->initial_size; // initial_size는 처음 file create 될 때 몇 개의 sector를 예약할지만 결정하고, 다른 곳에서는 안 쓰이는 것 같음
 
   if (!is_numerable) // nunmerable이 아닌 경우. [질문] nunmerable인 경우와 아닌 경우의 차이는 뭘까? -> 분석서에 있었으니 분석서 참고
     { // 순서를 갖지 않기 때문에 메타 데이터 공간은 보수적으로 잡음
@@ -3454,12 +3455,13 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
       VOLID first_volid = vsids_reserved[0].volid;
       bool is_file_dropped;
 
-      for (vsid_iter = vsids_reserved; // vsids_reserved 배열 순회
-	   vsid_iter < vsids_reserved + n_sectors && VFID_ISNULL (&found_vfid) // 예약한 섹터 내에서 vfid를 못 찾았다면 계속 순회
+      // [질문] 이 for문을 무슨 의미에서 순회하는지 모르겠음. [추측] vacuum에 drop 예약되어 있는 페이지는 건너뛰고, drop 예약이 아닌 page를 vfid로 선장하기 위해 순회하는 것 같음
+      for (vsid_iter = vsids_reserved; // vsids_reserved 배열 순회.
+	   vsid_iter < vsids_reserved + n_sectors && VFID_ISNULL (&found_vfid) // 예약한 섹터 내에서 found_vfid를 못 찾았다면 계속 순회
 	   && vsid_iter->volid == first_volid; vsid_iter++) // (vsid_iter->volid == first_volid) 이 조건이 참이면 바깥 for문을 계속 도는데 왜 그럴까? 위에서 reserve한 volid 내에서 찾아야 하기 때문일까?
 	{                                                                                                           // [질문] 만약 필요한 file 개수가 많아서 volume 두 개에 걸쳐야 한다면 한 volume 안에서 해결 못하지 않을까?
 	  vfid_iter.volid = vsid_iter->volid;
-	  for (vfid_iter.fileid = SECTOR_FIRST_PAGEID (vsid_iter->sectid); // vfid_iter의 fileid(첫 페이지)부터 전체 섹터(64개 페이지)를 순회
+	  for (vfid_iter.fileid = SECTOR_FIRST_PAGEID (vsid_iter->sectid); // vfid_iter의 fileid(첫 페이지)부터 섹터 전체(64개 페이지)를 순회
 	       vfid_iter.fileid <= SECTOR_LAST_PAGEID (vsid_iter->sectid); vfid_iter.fileid++)
 	    {
 	      error_code = vacuum_is_file_dropped (thread_p, &is_file_dropped, &vfid_iter, tran_mvccid); // 뭔지는 모르겠지만 이전에 drop이 명령된 file이 아니면 is_file_dropped은 false로 반환
@@ -3472,7 +3474,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
 	      if (is_file_dropped == false) // drop된 file이 아니면
 		{
 		  /* Good we found a file ID that is not considered dropped. */
-		  found_vfid = vfid_iter; // 해당 vfid로 반환
+		  found_vfid = vfid_iter; // 해당 vfid로 반환하고, found했으니 위 두 for문 모두 탈출할듯
 		  break;
 		}
 	    }
@@ -3484,7 +3486,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
 	  error_code = ER_FAILED;
 	  goto exit;
 	}
-      *vfid = found_vfid; // 위에서 찾은 vfid로 확정
+      *vfid = found_vfid; // 위에서 찾은 vfid로 반환할 file 확정
     }
   else
 #endif /* SERVER_MODE */
@@ -3652,7 +3654,7 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
   for (vsid_iter = vsids_reserved; vsid_iter < vsids_reserved + n_sectors; vsid_iter++) // reserved된 sector 순회
     {
       if (file_extdata_is_full (extdata_part_ftab)) // partial_ftab이 가득 찼다면. TODO: partial_ftab이 가득 찬 경우 생각
-	{
+	{                                           // [질문] 근데 file_create 과정에서 part_ftab이 full일 수가 있나?
 	  /* a new page for file table is required */
 
 	  /* allocate a page from partial table. */
@@ -3739,9 +3741,9 @@ file_create (THREAD_ENTRY * thread_p, FILE_TYPE file_type,
 
 	  fhead->n_page_ftab++;
 	}
-      assert (!file_extdata_is_full (extdata_part_ftab)); // 위에서 partial_ftab을 새로 할당했으니 가득 찬 상태일 수가 없음
+      assert (!file_extdata_is_full (extdata_part_ftab)); // 위에서 가득차지 않은 partial_ftab을 찾았거나 새로 할당했으니 가득 찬 상태일 수가 없음
 
-      partsect.vsid = *vsid_iter;
+      partsect.vsid = *vsid_iter; // 위에서 찾은 partial_ftab vsid_iter로 초기화
       partsect.page_bitmap = FILE_EMPTY_PAGE_BITMAP;
       if (partsect.vsid.sectid == SECTOR_FROM_PAGEID (vpid_fhead.pageid) && partsect.vsid.volid == vpid_fhead.volid) // fheader의 섹터와 지금 넣으려는 섹터 item과 같다면
 	{
@@ -3951,7 +3953,7 @@ file_table_collect_vsid (THREAD_ENTRY * thread_p, const void *item, int index_un
  */
 STATIC_INLINE int
 file_table_collect_all_vsids (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_VSID_COLLECTOR * collector_out)
-{
+{ // page_fhead에 속한 모든 sector를 수집해서 collector_out 배열에 담아서 반환
   FILE_HEADER *fhead;
   FILE_EXTENSIBLE_DATA *extdata_ftab;
   int error_code = NO_ERROR;
@@ -4017,7 +4019,7 @@ file_table_collect_all_vsids (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE
  */
 static int
 file_sector_map_dealloc (THREAD_ENTRY * thread_p, const void *data, int index, bool * stop, void *args)
-{
+{ // data로 전달된 sector의 페이지들을 순회하면서 할당된 적 있는 페이지면 pgbuf에서 dealloc함
   bool is_partial = *(bool *) args;
   FILE_PARTIAL_SECTOR partsect = FILE_PARTIAL_SECTOR_INITIALIZER;
   int offset = 0;
@@ -4035,29 +4037,29 @@ file_sector_map_dealloc (THREAD_ENTRY * thread_p, const void *data, int index, b
     }
 
   vpid.volid = partsect.vsid.volid;
-  for (offset = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); offset < DISK_SECTOR_NPAGES;
+  for (offset = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); offset < DISK_SECTOR_NPAGES; // sector의 모든 페이지(64개) 순회
        offset++, vpid.pageid++)
     {
-      if (is_partial && !file_partsect_is_bit_set (&partsect, offset))
+      if (is_partial && !file_partsect_is_bit_set (&partsect, offset)) // part_sector인데, 할당된 적 없는 페이지면 패스
 	{
 	  /* not allocated */
 	  continue;
 	}
-
-      page = pgbuf_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
+      // 여기로 왔다는건 할당된 페이지가 걸렸다는 뜻
+      page = pgbuf_fix (thread_p, &vpid, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH); // 할당한 적 있는 페이지 fix
       if (page == NULL)
 	{
 	  ASSERT_ERROR_AND_SET (error_code);
 	  return error_code;
 	}
 
-      if (pgbuf_get_page_ptype (thread_p, page) == PAGE_FTAB)
+      if (pgbuf_get_page_ptype (thread_p, page) == PAGE_FTAB) // 해당 페이지가 ftab 용도라면 패스
 	{
 	  /* table page, do not deallocate yet */
 	  pgbuf_unfix_and_init (thread_p, page);
 	  continue;
 	}
-      pgbuf_dealloc_page (thread_p, page);
+      pgbuf_dealloc_page (thread_p, page); // 뭔지 모르겠지만 pgbuf에서 dealloc을 함. 메모리에서 page 할당 해제를 한다고 보면 될듯
       page = NULL;
     }
 
@@ -4076,7 +4078,7 @@ file_sector_map_dealloc (THREAD_ENTRY * thread_p, const void *data, int index, b
  */
 static int
 file_sector_map_dealloc_temp (THREAD_ENTRY * thread_p, const void *data, int index, bool * stop, void *args)
-{
+{ // 주어진 sector의 page_bit를 순회하면서 활성화된 page를 dealloc해줌
   bool is_partial = *(bool *) args;
   FILE_PARTIAL_SECTOR partsect = FILE_PARTIAL_SECTOR_INITIALIZER;
   int offset = 0;
@@ -4088,22 +4090,22 @@ file_sector_map_dealloc_temp (THREAD_ENTRY * thread_p, const void *data, int ind
     {
       partsect = *(FILE_PARTIAL_SECTOR *) data;
     }
-  else
+  else // [refactor]temp에 full_sect가 없는데 이 조건이 필요할까?
     {
       partsect.vsid = *(VSID *) data;
     }
 
   vpid.volid = partsect.vsid.volid;
-  for (offset = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); offset < DISK_SECTOR_NPAGES;
+  for (offset = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); offset < DISK_SECTOR_NPAGES; // sector의 page_bit들을 순회
        offset++, vpid.pageid++)
     {
-      if (is_partial && !file_partsect_is_bit_set (&partsect, offset))
+      if (is_partial && !file_partsect_is_bit_set (&partsect, offset)) // 지금 offset의 page_bit가 활성화되어 있지 않다면 패스
 	{
 	  /* not allocated */
 	  continue;
 	}
 
-      page = pgbuf_simple_fix (thread_p, &vpid, false);
+      page = pgbuf_simple_fix (thread_p, &vpid, false); // 자세히는 모르겠지만 활성화된 page들을 dealloc해주고 있음
       if (page == NULL)
 	{
 	  /* don't care about page which is not on page buffer. */
@@ -4167,7 +4169,7 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
   else
     {
       /* permanent files are first removed from tracker */
-      error_code = file_tracker_unregister (thread_p, vfid);
+      error_code = file_tracker_unregister (thread_p, vfid); // file_tracker에서 unregister
       if (error_code != NO_ERROR)
 	{
 	  assert_release (false);
@@ -4201,26 +4203,26 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
   assert (is_temp == FILE_IS_TEMPORARY (fhead));
   assert (FILE_IS_TEMPORARY (fhead) || log_check_system_op_is_started (thread_p));
 
-  error_code = file_table_collect_all_vsids (thread_p, page_fhead, &vsid_collector);
+  error_code = file_table_collect_all_vsids (thread_p, page_fhead, &vsid_collector); // fhead에 속한 sector를 vsid_collector 배열에 반환
   if (error_code != NO_ERROR)
     {
       assert_release (false);
       goto exit;
     }
-  volpurpose = FILE_IS_TEMPORARY (fhead) ? DB_TEMPORARY_DATA_PURPOSE : DB_PERMANENT_DATA_PURPOSE;
+  volpurpose = FILE_IS_TEMPORARY (fhead) ? DB_TEMPORARY_DATA_PURPOSE : DB_PERMANENT_DATA_PURPOSE; // temp 여부
 
   file_log ("file_destroy",
 	    "file %d|%d unreserve %d sectors \n" FILE_HEAD_FULL_MSG,
 	    VFID_AS_ARGS (vfid), fhead->n_sector_total, FILE_HEAD_FULL_AS_ARGS (fhead));
 
-  if (!FILE_IS_TEMPORARY (fhead))
+  if (!FILE_IS_TEMPORARY (fhead)) // perm file이면
     {
       /* we need to deallocate pages */
       ftab_collector.npages = 0;
       ftab_collector.nsects = 0;
       ftab_collector.partsect_ftab =
-	(FILE_PARTIAL_SECTOR *) db_private_alloc (thread_p, fhead->n_page_ftab * sizeof (FILE_PARTIAL_SECTOR));
-      if (ftab_collector.partsect_ftab == NULL)
+	(FILE_PARTIAL_SECTOR *) db_private_alloc (thread_p, fhead->n_page_ftab * sizeof (FILE_PARTIAL_SECTOR)); // [질문] 왜 n_page_ftab를 기준으로 하지? page 안에는 여러개의 part_sector가 들어갈 수 있는거 아닌가?
+      if (ftab_collector.partsect_ftab == NULL)                                                                 // 예시로 한 페이지에 10개의 part_sector가 들어 있으면 partsect_ftab은 하나밖에 수용할 수 없는데?
 	{
 	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1,
 		  fhead->n_page_ftab * sizeof (FILE_PARTIAL_SECTOR));
@@ -4231,7 +4233,7 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
       FILE_HEADER_GET_PART_FTAB (fhead, extdata_ftab);
       is_partial = true;
       error_code =
-	file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, &ftab_collector,
+	file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, &ftab_collector, // partial_ftab의 모든 sector의 페이지를 순회하면서 할당된 적 있는 페이지면 pgbuf(메모리)에서 dealloc해주고, ftab_collector에 part_ftab->vpid_next에 있는 ftab들을 모아줌
 				  file_sector_map_dealloc, &is_partial, true, NULL, NULL);
       if (error_code != NO_ERROR)
 	{
@@ -4242,7 +4244,7 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
       FILE_HEADER_GET_FULL_FTAB (fhead, extdata_ftab);
       is_partial = false;
       error_code =
-	file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, &ftab_collector,
+	file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, &ftab_collector, // full_ftab의 모든 sector의 페이지를 순회하면서 pgbuf(메모리)에서 dealloc해주고, ftab_collector에 full_ftab->vpid_next에 있는 ftab들을 모아줌
 				  file_sector_map_dealloc, &is_partial, true, NULL, NULL);
       if (error_code != NO_ERROR)
 	{
@@ -4251,7 +4253,7 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
 	}
 
       /* deallocate table pages - other than header page */
-      for (iter_sects = 0; iter_sects < ftab_collector.nsects; iter_sects++)
+      for (iter_sects = 0; iter_sects < ftab_collector.nsects; iter_sects++) // part/full_ftab->vpid_next에 속한 sector들의 전체 페이지를 순회하면서 할당된 적 있는 페이지면 모두 메모리에서 dealloc
 	{
 	  vpid_ftab.volid = ftab_collector.partsect_ftab[iter_sects].vsid.volid;
 	  for (offset = 0,
@@ -4272,10 +4274,10 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
 	    }
 	}
       /* deallocate header page */
-      pgbuf_dealloc_page (thread_p, page_fhead);
+      pgbuf_dealloc_page (thread_p, page_fhead); // fhead 페이지도 dealloc
       page_fhead = NULL;
     }
-  else
+  else // temp file이면
     {
       /* invalidate pages in page buffer. actually remove dirty flag. */
       ftab_collector.npages = 0;
@@ -4340,7 +4342,7 @@ file_destroy (THREAD_ENTRY * thread_p, const VFID * vfid, bool is_temp)
     }
 
   /* release occupied sectors on disk */
-  error_code = disk_unreserve_ordered_sectors (thread_p, volpurpose, vsid_collector.n_vsids, vsid_collector.vsids);
+  error_code = disk_unreserve_ordered_sectors (thread_p, volpurpose, vsid_collector.n_vsids, vsid_collector.vsids); // fhead에 속한 모든 sector들을 unreserve하도록 disk 모듈 호출
   if (error_code != NO_ERROR)
     {
       assert_release (false);
@@ -4469,13 +4471,13 @@ file_temp_retire_preserved (THREAD_ENTRY * thread_p, const VFID * vfid)
 
 int
 file_temp_truncate (THREAD_ENTRY * thread_p, const VFID * vfid)
-{
+{ // show tables; 명령에서도 호출됨
   int error_code = NO_ERROR;
   if (vfid == NULL || VFID_ISNULL (vfid))
     {
       return NO_ERROR;
     }
-  error_code = file_temp_reset_user_pages (thread_p, vfid);
+  error_code = file_temp_reset_user_pages (thread_p, vfid); // vfid의 페이지들 초기화
   if (error_code != NO_ERROR)
     {
       assert (false);
@@ -4498,10 +4500,10 @@ file_temp_retire_internal (THREAD_ENTRY * thread_p, const VFID * vfid, bool was_
   FILE_TEMPCACHE_ENTRY *entry = NULL;
   int error_code = NO_ERROR;
 
-  if (was_preserved)
-    {
+  if (was_preserved) // preserve라면
+    {                // [참고] preserve는 정확히 어떤 상황에서 호출되는지는 모르겠지만 query나 list에서 호출되는 것 같다.
       file_tempcache_lock ();
-      error_code = file_tempcache_alloc_entry (&entry);
+      error_code = file_tempcache_alloc_entry (&entry); // entry 껍질만 할당
       file_tempcache_unlock ();
       if (error_code != NO_ERROR)
 	{
@@ -4509,21 +4511,21 @@ file_temp_retire_internal (THREAD_ENTRY * thread_p, const VFID * vfid, bool was_
 	}
       if (entry != NULL)
 	{
-	  entry->vfid = *vfid;
-	  /* type will be set later */
+	  entry->vfid = *vfid; // preserve면 미리 할당되어 있는 vfid 사용
+	  /* type will be set later */ // [추측] preserve면 미리 할당받아놓은 vfid를 사용하나 봄
 	}
       else
 	{
 	  assert (false);
 	}
     }
-  else
+  else // preserve가 아니면
     {
-      entry = file_tempcache_pop_tran_file (thread_p, vfid);
+      entry = file_tempcache_pop_tran_file (thread_p, vfid); // tran_index로 temp_cache.tran_files에서 entry를 찾고 vfid에 해당하는 엔트리 삭제
       assert (entry != NULL);
     }
 
-  if (entry != NULL && file_tempcache_put (thread_p, entry))
+  if (entry != NULL && file_tempcache_put (thread_p, entry)) // file_Tempcache.cache* entry list에 자리가 있으면 삽입하고, 없으면 false 반환
     {
       /* cached */
       return NO_ERROR;
@@ -4531,7 +4533,7 @@ file_temp_retire_internal (THREAD_ENTRY * thread_p, const VFID * vfid, bool was_
 
   /* was not cached. destroy */
   /* don't allow interrupt to avoid file leak */
-  error_code = file_destroy (thread_p, vfid, true);
+  error_code = file_destroy (thread_p, vfid, true); // file_Tempcache.cache* entry에 자리가 없으므로 vfid는 destroy
   if (error_code != NO_ERROR)
     {
       /* we should not have errors */
@@ -4540,7 +4542,7 @@ file_temp_retire_internal (THREAD_ENTRY * thread_p, const VFID * vfid, bool was_
 
   if (entry != NULL)
     {
-      file_tempcache_retire_entry (entry);
+      file_tempcache_retire_entry (entry); // vfid는 destroy해도 entry는 file_Tempcache.free_entry에 삽입
     }
   return error_code;
 }
@@ -4685,14 +4687,14 @@ file_perm_expand (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead)
    * exceed the capacity of partial table in file header. we want to avoid the headache of allocating file table pages
    */
   FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab);
-  expand_min_size_in_sectors = MAX (fhead->tablespace.expand_min_size / DB_SECTORSIZE, 1);
+  expand_min_size_in_sectors = MAX (fhead->tablespace.expand_min_size / DB_SECTORSIZE, 1); // 64, 1 중에 큰 수
   expand_max_size_in_sectors =
     MIN (fhead->tablespace.expand_max_size / DB_SECTORSIZE, file_extdata_remaining_capacity (extdata_part_ftab));
-  assert (expand_min_size_in_sectors <= expand_max_size_in_sectors);
+  assert (expand_min_size_in_sectors <= expand_max_size_in_sectors); // [질문] expand_max_size랑 min_size가 뭔지 모르겠음
 
-  expand_size_in_sectors = (int) ((float) fhead->n_sector_total * fhead->tablespace.expand_ratio);
-  expand_size_in_sectors = MAX (expand_size_in_sectors, expand_min_size_in_sectors);
-  expand_size_in_sectors = MIN (expand_size_in_sectors, expand_max_size_in_sectors);
+  expand_size_in_sectors = (int) ((float) fhead->n_sector_total * fhead->tablespace.expand_ratio); // 현재 섹터 개수에 expand 비율에 맞게 조절. [질문] 그럼 현재 섹터 개수가 5개면 5개를 확장해버리나?
+  expand_size_in_sectors = MAX (expand_size_in_sectors, expand_min_size_in_sectors); // min_size 이상
+  expand_size_in_sectors = MIN (expand_size_in_sectors, expand_max_size_in_sectors); // max_size 이하
 
   file_log ("file_perm_expand",
 	    "expand file %d|%d by %d sectors. \n" FILE_HEAD_ALLOC_MSG FILE_TABLESPACE_MSG,
@@ -4700,7 +4702,7 @@ file_perm_expand (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead)
 	    FILE_TABLESPACE_AS_ARGS (&fhead->tablespace));
 
   /* allocate a buffer to hold the new sectors */
-  vsids_reserved = (VSID *) db_private_alloc (thread_p, expand_size_in_sectors * sizeof (VSID));
+  vsids_reserved = (VSID *) db_private_alloc (thread_p, expand_size_in_sectors * sizeof (VSID)); // 확장할 섹터만큼 VSID 배열 alloc
   if (vsids_reserved == NULL)
     {
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1, expand_size_in_sectors * sizeof (VSID));
@@ -4715,7 +4717,7 @@ file_perm_expand (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead)
 
   /* reserve disk sectors */
   error_code =
-    disk_reserve_sectors (thread_p, DB_PERMANENT_DATA_PURPOSE, fhead->volid_last_expand, expand_size_in_sectors,
+    disk_reserve_sectors (thread_p, DB_PERMANENT_DATA_PURPOSE, fhead->volid_last_expand, expand_size_in_sectors, // 위에서 결정된 섹터 개수만큼 disk에 요청
 			  vsids_reserved);
   if (error_code != NO_ERROR)
     {
@@ -4727,14 +4729,14 @@ file_perm_expand (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead)
   qsort (vsids_reserved, expand_size_in_sectors, sizeof (VSID), disk_compare_vsids);
 
   /* save in file header partial table. all sectors will be empty */
-  partsect.page_bitmap = FILE_EMPTY_PAGE_BITMAP;
-  for (vsid_iter = vsids_reserved; vsid_iter < vsids_reserved + expand_size_in_sectors; vsid_iter++)
+  partsect.page_bitmap = FILE_EMPTY_PAGE_BITMAP; // 빈 page_bit 세팅
+  for (vsid_iter = vsids_reserved; vsid_iter < vsids_reserved + expand_size_in_sectors; vsid_iter++) // 할당받은 섹터 순회하면서
     {
       partsect.vsid = *vsid_iter;
-      file_extdata_append (extdata_part_ftab, &partsect);
+      file_extdata_append (extdata_part_ftab, &partsect); // partial_ftab 끝에 할당받은 new 섹터 추가
     }
 
-  /* update header stats */
+  /* update header stats */ // fhead 값 조정
   fhead->n_sector_total += expand_size_in_sectors;
   assert (fhead->n_sector_empty == 0);
   fhead->n_sector_empty = expand_size_in_sectors;
@@ -4748,7 +4750,7 @@ file_perm_expand (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead)
   save_lsa = *pgbuf_get_lsa (page_fhead);
 
   /* file extended successfully. log the change. */
-  log_append_undoredo_data2 (thread_p, RVFL_EXPAND, NULL, page_fhead, 0, 0,
+  log_append_undoredo_data2 (thread_p, RVFL_EXPAND, NULL, page_fhead, 0, 0, // undo_logging
 			     expand_size_in_sectors * sizeof (VSID), NULL, vsids_reserved);
 
   file_log ("file_perm_expand",
@@ -5184,7 +5186,7 @@ file_rv_dump_vfid_and_vpid (FILE * fp, int length, void *data)
  */
 static int
 file_perm_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE alloc_type, VPID * vpid_alloc_out)
-{ // [제미나이 예습] 주요 메커니즘 1. partial table 탐색 2. file 확장 3. partial -> full 업데이트
+{ // partial_sector의 첫 item에 해당하는 sector에서 아직 할당한 적 없는 페이지를 찾고, bitmap 활성화 하고, fhead값 조정. 그 외 새로운 페이지 할당할 sector가 partial->full로 이동해야 하는 상황이라면 추가 작업
   FILE_HEADER *fhead = (FILE_HEADER *) page_fhead;
   FILE_EXTENSIBLE_DATA *extdata_part_ftab = NULL;
   FILE_PARTIAL_SECTOR *partsect;
@@ -5254,7 +5256,7 @@ file_perm_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
   assert (!file_extdata_is_empty (extdata_part_ftab));
 
   /* allocate a new page in first partial sector */
-  partsect = (FILE_PARTIAL_SECTOR *) file_extdata_start (extdata_part_ftab);
+  partsect = (FILE_PARTIAL_SECTOR *) file_extdata_start (extdata_part_ftab); // 잘은 모르지만 partial_sector_ftab에 붙은 item들 중 가장 첫 item 먼저 다 써서 full로 만들고 그 다음 item을 사용하는 방식으로 진행되는듯
 
   /* should not be full */
   assert (!file_partsect_is_full (partsect));
@@ -5263,7 +5265,7 @@ file_perm_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
   was_empty = file_partsect_is_empty (partsect); // 첫 partial_sector의 페이지들이 모두 할당된 적이 없고 비어 있는 상태라면
 
   /* allocate a page in this partial sector */
-  if (!file_partsect_alloc (partsect, vpid_alloc_out, &offset_to_alloc_bit)) //partial_sector_ftab에서 비어 있는(0) page_bit를 활성화(1)하고 해당 페이지의 vpid와 offset 반환
+  if (!file_partsect_alloc (partsect, vpid_alloc_out, &offset_to_alloc_bit)) // partial_sector_ftab에서 할당한 적 없는 페이지를 찾고, page_bit를 활성화(1)하고 해당 페이지의 vpid와 offset 반환
     {
       /* should not happen, this is a logic error. */
       assert_release (false);
@@ -5302,7 +5304,7 @@ file_perm_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
   is_full = file_partsect_is_full (partsect); // 위에서 page_bit를 활성화 시키면서 해당 sector가 full이 된 경우를 뜻하는듯?
 
   /* update header statistics */
-  file_header_alloc (fhead, alloc_type, was_empty, is_full); // 새로운 page 할당하면서 fhead값 조정
+  file_header_alloc (fhead, alloc_type, was_empty, is_full); // 새로운 page alloc하면서 변경되는 fhead값 조정
   save_lsa = *pgbuf_get_lsa (page_fhead);
   file_log_fhead_alloc (thread_p, page_fhead, alloc_type, was_empty, is_full);
 
@@ -5424,7 +5426,7 @@ file_init_page_type_internal (THREAD_ENTRY * thread_p, PAGE_PTR page, PAGE_TYPE 
 int
 file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_init, void *f_init_args, VPID * vpid_out,
 	    PAGE_PTR * page_out)
-{
+{ // partial sector에서 할당한 적 없는 vpid를 획득하고, fhead 값을 조정하고, f_init() 함수가 전달됐다면 해당 vpid 초기화해주고, 페이지에 TDE 설정
 #define UNDO_DATA_SIZE (sizeof (VFID) + sizeof (VPID))
   VPID vpid_fhead;
   PAGE_PTR page_fhead = NULL;
@@ -5476,14 +5478,14 @@ file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_in
       is_sysop_started = true;
 
       /* allocate page */
-      error_code = file_perm_alloc (thread_p, page_fhead, FILE_ALLOC_USER_PAGE, vpid_out);
+      error_code = file_perm_alloc (thread_p, page_fhead, FILE_ALLOC_USER_PAGE, vpid_out); // alloc 가능한 vpid 획득
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
 	  goto exit;
 	}
 
-      /* make undo data for system op commit */
+      /* make undo data for system op commit */ // 자세히는 모르겠지만 undo logging을 위한 copy가 수행되는듯
       VFID_COPY ((VFID *) undo_log_data, vfid);
       VPID_COPY ((VPID *) (undo_log_data + sizeof (VFID)), vpid_out);
     }
@@ -5493,7 +5495,7 @@ file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_in
   if (FILE_IS_NUMERABLE (fhead))
     {
       /* we also have to add page to user page table */
-      error_code = file_numerable_add_page (thread_p, page_fhead, vpid_out);
+      error_code = file_numerable_add_page (thread_p, page_fhead, vpid_out); // numerable page는 sort에서만 사용하는 것 같으니 나중에 보는걸로 하자. TODO
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -5501,16 +5503,16 @@ file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_in
 	}
     }
 
-  if (f_init)
-    {
+  if (f_init) // file을 전용 페이지로 init하는 함수가 전달됐다면(예: btree, heap... 등등)
+    {         // 아마 first_sticky_page를 지정하기 위해 file_alloc()이 호출됐다면 f_init함수가 있을듯
       /* initialize page */
-      PAGE_PTR page_alloc = pgbuf_fix (thread_p, vpid_out, NEW_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
+      PAGE_PTR page_alloc = pgbuf_fix (thread_p, vpid_out, NEW_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH); // 새로 alloc할 페이지 fix
       if (page_alloc == NULL)
 	{
 	  ASSERT_ERROR_AND_SET (error_code);
 	  goto exit;
 	}
-      error_code = f_init (thread_p, page_alloc, f_init_args);
+      error_code = f_init (thread_p, page_alloc, f_init_args); // 전달된 f_init함수로 alloc할 페이지 init
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -5520,7 +5522,7 @@ file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_in
 
       assert (pgbuf_get_page_ptype (thread_p, page_alloc) != PAGE_UNKNOWN);
 
-      tde_algo = file_get_tde_algorithm_internal (fhead);
+      tde_algo = file_get_tde_algorithm_internal (fhead); // TDE 알고리즘 반환(BTREE-NONE)
 
 #if !defined (NDEBUG)
       {
@@ -5535,7 +5537,7 @@ file_alloc (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_INIT_PAGE_FUNC f_in
       }
 #endif /* NDEBUG */
 
-      pgbuf_set_tde_algorithm (thread_p, page_alloc, tde_algo, FILE_IS_TEMPORARY (fhead));
+      pgbuf_set_tde_algorithm (thread_p, page_alloc, tde_algo, FILE_IS_TEMPORARY (fhead)); // 새 alloc 페이지에 tde_algo 설정
 
       if (page_out != NULL)
 	{
@@ -5579,7 +5581,7 @@ exit:
     }
 
   /* allocation should be completed; check header */
-  file_header_sanity_check (thread_p, fhead);
+  file_header_sanity_check (thread_p, fhead); // alloc하고 fhead와 ftab의 sector들 일치하는지 확인
 
   if (error_code != NO_ERROR && page_out != NULL && *page_out != NULL)
     {
@@ -5731,7 +5733,7 @@ file_alloc_sticky_first_page (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_I
   assert (fhead->n_page_user == 0);
   assert (VPID_ISNULL (&fhead->vpid_sticky_first));
 
-  error_code = file_alloc (thread_p, vfid, f_init, f_init_args, vpid_out, page_out);
+  error_code = file_alloc (thread_p, vfid, f_init, f_init_args, vpid_out, page_out); // 할당 가능한 vpid 찾아서 해당 페이지 f_init() 함수로 init
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -5742,11 +5744,11 @@ file_alloc_sticky_first_page (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_I
   save_lsa = *pgbuf_get_lsa (page_fhead);
   log_append_undoredo_data2 (thread_p, RVFL_FHEAD_STICKY_PAGE, NULL,
 			     page_fhead, 0, sizeof (VPID), sizeof (VPID), &fhead->vpid_sticky_first, vpid_out);
-  fhead->vpid_sticky_first = *vpid_out;
+  fhead->vpid_sticky_first = *vpid_out; // 위에서 alloc한 vpid를 first_sticky_page로 지정
   pgbuf_set_dirty (thread_p, page_fhead, DONT_FREE);
 
   /* done */
-  file_header_sanity_check (thread_p, fhead);
+  file_header_sanity_check (thread_p, fhead); // fhead와 ftab 일치하는지 체크
   assert (error_code == NO_ERROR);
 
   file_log ("file_alloc_sticky_first_page",
@@ -5981,7 +5983,7 @@ file_get_tde_algorithm (THREAD_ENTRY * thread_p, const VFID * vfid, PGBUF_LATCH_
  */
 TDE_ALGORITHM
 file_get_tde_algorithm_internal (const FILE_HEADER * fhead)
-{
+{ // file_flag로 어떤 TDE 알고리즘을 사용할지 반환함
   // encryption algorithms are exclusive
   assert (!((fhead->file_flags & FILE_FLAG_ENCRYPTED_AES) && (fhead->file_flags & FILE_FLAG_ENCRYPTED_ARIA)));
 
@@ -6021,7 +6023,7 @@ file_file_map_set_tde_algorithm (THREAD_ENTRY * thread_p, PAGE_PTR * page, bool 
  */
 int
 file_apply_tde_algorithm (THREAD_ENTRY * thread_p, const VFID * vfid, const TDE_ALGORITHM tde_algo)
-{
+{ // 전달된 vfid의 fhead의 tde_algo와 파라미터 tde_algo가 일치하는지 확인. 일치하지 않는 경우는 확인해봐야 함. TODO
   int error_code = NO_ERROR;
   FILE_SET_TDE_ALGORITHM_ARGS args;
   VPID vpid_fhead;
@@ -6043,12 +6045,12 @@ file_apply_tde_algorithm (THREAD_ENTRY * thread_p, const VFID * vfid, const TDE_
     }
 
   fhead = (FILE_HEADER *) page_fhead;
-  file_header_sanity_check (thread_p, fhead);
+  file_header_sanity_check (thread_p, fhead); // fhead-ftab 일치하는지 체크
 
-  prev_tde_algo = file_get_tde_algorithm_internal (fhead);
+  prev_tde_algo = file_get_tde_algorithm_internal (fhead); // fhead->file_flags로 tde 알고리즘 반환
 
-  if (prev_tde_algo == tde_algo)
-    {
+  if (prev_tde_algo == tde_algo) // 전달된 알고리즘과 동일하면 그냥 return함
+    { // 대부분 이 케이스에 해당됨
       /* it is already applied */
       pgbuf_unfix (thread_p, page_fhead);
       return NO_ERROR;
@@ -6196,7 +6198,7 @@ file_dealloc (THREAD_ENTRY * thread_p, const VFID * vfid, const VPID * vpid, FIL
       /* for all files, we add a postpone record and do the actual deallocation at run postpone. */
       VFID_COPY ((VFID *) log_data, vfid);
       VPID_COPY ((VPID *) (log_data + sizeof (VFID)), vpid);
-      log_append_postpone (thread_p, RVFL_DEALLOC, &log_addr, LOG_DATA_SIZE, log_data);
+      log_append_postpone (thread_p, RVFL_DEALLOC, &log_addr, LOG_DATA_SIZE, log_data); // postpone 함수에 dealloc할 page 등록
 
       file_log ("file_dealloc", "file %s %d|%d dealloc vpid %d|%d postponed",
 		file_type_to_string (file_type_hint), VFID_AS_ARGS (vfid), VPID_AS_ARGS (vpid));
@@ -6371,7 +6373,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 
   /* search partial table. */
   FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab);
-  error_code = file_extdata_search_item (thread_p, &extdata_part_ftab, &vsid_dealloc, disk_compare_vsids, true, true,
+  error_code = file_extdata_search_item (thread_p, &extdata_part_ftab, &vsid_dealloc, disk_compare_vsids, true, true, // 삭제할 vpid가 있는 섹터 part_ftab에서 search. part_ftab에 없고 full_ftab에 있을 수 있음
 					 &found, &position, &page_ftab);
   if (error_code != NO_ERROR)
     {
@@ -6379,15 +6381,15 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
       goto exit;
     }
 
-  if (found)
+  if (found) // 삭제할 page가 part_ftab에 있다면
     {
       /* clear the bit for page. */
-      FILE_PARTIAL_SECTOR *partsect = (FILE_PARTIAL_SECTOR *) file_extdata_at (extdata_part_ftab, position);
+      FILE_PARTIAL_SECTOR *partsect = (FILE_PARTIAL_SECTOR *) file_extdata_at (extdata_part_ftab, position); // 섹터 위치 반환
 
-      offset_to_dealloc_bit = file_partsect_pageid_to_offset (partsect, vpid_dealloc->pageid);
+      offset_to_dealloc_bit = file_partsect_pageid_to_offset (partsect, vpid_dealloc->pageid); // 섹터 내 페이지 위치 반환
 
-      file_partsect_clear_bit (partsect, offset_to_dealloc_bit);
-      is_empty = file_partsect_is_empty (partsect);
+      file_partsect_clear_bit (partsect, offset_to_dealloc_bit); // 해당 page_bit 0으로 초기화
+      is_empty = file_partsect_is_empty (partsect); // 페이지 dealloc하면서 속해 있던 sector가 empty가 됐다면 true
 
       addr.pgptr = page_ftab != NULL ? page_ftab : page_fhead;
       addr.offset = (PGLENGTH) (((char *) partsect) - addr.pgptr);
@@ -6412,7 +6414,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	  pgbuf_unfix_and_init (thread_p, page_ftab);
 	}
     }
-  else
+  else // 삭제할 page가 full_ftab에 있다면
     {
       /* not in partial table. */
       FILE_PARTIAL_SECTOR partsect_new;
@@ -6425,27 +6427,27 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 
       was_full = true;
       FILE_HEADER_GET_FULL_FTAB (fhead, extdata_full_ftab);
-      error_code = file_extdata_find_and_remove_item (thread_p, extdata_full_ftab, page_fhead, &vsid_dealloc,
-						      disk_compare_vsids, true, NULL, &vpid_merged);
-      if (error_code != NO_ERROR)
+      error_code = file_extdata_find_and_remove_item (thread_p, extdata_full_ftab, page_fhead, &vsid_dealloc, // full_ftab에서 삭제할 page가 속한 섹터를 제거하고, 현재 full_ftab이 속한 page를 prev_ftab에 merge하든,
+						      disk_compare_vsids, true, NULL, &vpid_merged);          // next_ftab에 있는 item들을 현재 full_ftab에 merge
+      if (error_code != NO_ERROR)                                                                             // merge 성공 시 vpid_merged 반환
 	{
 	  ASSERT_ERROR ();
 	  goto exit;
 	}
-      if (!VPID_ISNULL (&vpid_merged))
+      if (!VPID_ISNULL (&vpid_merged)) // 위에서 full_ftab의 item 제거하면서 merge까지 성공했다면
 	{
 	  /* full table page was merged. we need to deallocate the merged page too, unless it belong to the same sector
 	   * as deallocated page. in that case, we only need to remove its bit from the sector we are moving to partial
 	   * table. */
-	  if (VSID_IS_SECTOR_OF_VPID (&vsid_dealloc, &vpid_merged))
+	  if (VSID_IS_SECTOR_OF_VPID (&vsid_dealloc, &vpid_merged)) // dealloc하려는 페이지가 속한 ftab에 next_ftab을 merge하기로 했고, next_ftab의 페이지가 dealloc하려는 페이지의 섹터에 속해 있다면
 	    {
-	      is_merged_page_from_sector = true;
+	      is_merged_page_from_sector = true; // 표시만 해두고 아래에서 처리
 	      /* we'll deal with it below */
 	    }
 	  else
 	    {
 	      /* deallocate page. */
-	      error_code = file_perm_dealloc (thread_p, page_fhead, &vpid_merged, FILE_ALLOC_TABLE_PAGE);
+	      error_code = file_perm_dealloc (thread_p, page_fhead, &vpid_merged, FILE_ALLOC_TABLE_PAGE); // merge된 vpid dealloc 수행(재귀호출로 계속 실행될 수 있음)
 	      if (error_code != NO_ERROR)
 		{
 		  ASSERT_ERROR ();
@@ -6458,22 +6460,22 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 
       /* create the partial sector structure without the bit for page */
       FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab);
-      partsect_new.vsid = vsid_dealloc;
+      partsect_new.vsid = vsid_dealloc; // dealloc 대상 페이지가 속한 full_sect를 part_sect로 변경하기 위해 part_sect 작업
       partsect_new.page_bitmap = FILE_FULL_PAGE_BITMAP;
-      offset_to_dealloc_bit = file_partsect_pageid_to_offset (&partsect_new, vpid_dealloc->pageid);
-      file_partsect_clear_bit (&partsect_new, offset_to_dealloc_bit);
-      if (is_merged_page_from_sector)
+      offset_to_dealloc_bit = file_partsect_pageid_to_offset (&partsect_new, vpid_dealloc->pageid); // dealloc할 page_bit 위치 반환
+      file_partsect_clear_bit (&partsect_new, offset_to_dealloc_bit); // dealloc할 페이지는 0으로 비활성화
+      if (is_merged_page_from_sector) // dealloc할 페이지가 속한 ftab에 next_ftab을 merge하기로 했고, next_ftab 페이지가 dealloc할 페이지가 속한 섹터에 있다면
 	{
 	  /* we also need to remove merged page from this sector. */
-	  offset_to_dealloc_bit = file_partsect_pageid_to_offset (&partsect_new, vpid_merged.pageid);
-	  file_partsect_clear_bit (&partsect_new, offset_to_dealloc_bit);
+	  offset_to_dealloc_bit = file_partsect_pageid_to_offset (&partsect_new, vpid_merged.pageid); // next_ftab 페이지의 bit 위치 반환
+	  file_partsect_clear_bit (&partsect_new, offset_to_dealloc_bit); // next_ftab 페이지 비트 0으로 비활성화
 
 	  file_log ("file_perm_dealloc",
 		    "merged full table page %d|%d also belongs to sector being moved to partial table \n",
 		    VPID_AS_ARGS (&vpid_merged));
 
 	  /* need to update file header */
-	  file_header_dealloc (fhead, FILE_ALLOC_TABLE_PAGE, false, false);
+	  file_header_dealloc (fhead, FILE_ALLOC_TABLE_PAGE, false, false); // ftab 페이지 하나 줄어든거 fheader에 기록
 	  save_page_lsa = *pgbuf_get_lsa (page_fhead);
 	  file_log_fhead_dealloc (thread_p, page_fhead, FILE_ALLOC_TABLE_PAGE, false, false);
 
@@ -6496,7 +6498,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	}
 
       /* find free space */
-      error_code = file_extdata_find_not_full (thread_p, &extdata_part_ftab, &page_ftab, &found);
+      error_code = file_extdata_find_not_full (thread_p, &extdata_part_ftab, &page_ftab, &found); // 자리가 빈 part_ftab 페이지 반환. 모두 가득 찼다면 found는 false
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -6510,8 +6512,8 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	  /* found free space in table */
 
 	  /* find the correct position for new partial sector to keep the table ordered */
-	  file_extdata_find_ordered (extdata_part_ftab, &vsid_dealloc, disk_compare_vsids, &found, &position);
-	  if (found)
+	  file_extdata_find_ordered (extdata_part_ftab, &vsid_dealloc, disk_compare_vsids, &found, &position); // full_sector를 part_sect로 삽입할 위치 반환(orderd에 맞춰서 들어갈 위치 파악함)
+	  if (found) // found가 true면 위에서 중복된 vsid_dealloc을 찾았다는 뜻이므로 오류
 	    {
 	      /* ups, duplicate! */
 	      assert_release (false);
@@ -6520,7 +6522,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	    }
 	  save_page_lsa = *pgbuf_get_lsa (addr.pgptr);
 	  file_log_extdata_add (thread_p, extdata_part_ftab, addr.pgptr, position, 1, &partsect_new);
-	  file_extdata_insert_at (extdata_part_ftab, position, 1, &partsect_new);
+	  file_extdata_insert_at (extdata_part_ftab, position, 1, &partsect_new); // 위에서 찾은 position에 part_sect 삽입
 
 	  file_log ("file_perm_dealloc",
 		    "add new partsect at position %d in file %d|%d, page %d|%d, prev_lsa %lld|%d, "
@@ -6536,12 +6538,12 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	      pgbuf_unfix_and_init (thread_p, page_ftab);
 	    }
 	}
-      else
+      else // part_ftab이 모두 찼다면 ftab 페이지 하나 alloc 받아서 새로운 ftab 페이지에 part_sect 삽입
 	{
 	  /* no free space in partial table. we need to add a new page. */
 	  VPID vpid_ftab_new = VPID_INITIALIZER;
 
-	  error_code = file_perm_alloc (thread_p, page_fhead, FILE_ALLOC_TABLE_PAGE, &vpid_ftab_new);
+	  error_code = file_perm_alloc (thread_p, page_fhead, FILE_ALLOC_TABLE_PAGE, &vpid_ftab_new); // 새로운 part_ftab 페이지 alloc
 	  if (error_code != NO_ERROR)
 	    {
 	      ASSERT_ERROR ();
@@ -6571,7 +6573,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
 	  /* init new extensible data and add new partial sector */
 	  extdata_part_ftab = (FILE_EXTENSIBLE_DATA *) page_ftab;
 	  file_extdata_init (sizeof (FILE_PARTIAL_SECTOR), DB_PAGESIZE, extdata_part_ftab);
-	  file_extdata_append (extdata_part_ftab, &partsect_new);
+	  file_extdata_append (extdata_part_ftab, &partsect_new); // part_sect를 할당받은 새 ftab 페이지에 삽입
 	  pgbuf_log_new_page (thread_p, page_ftab, file_extdata_size (extdata_part_ftab), PAGE_FTAB);
 
 	  file_log ("file_perm_dealloc",
@@ -6590,7 +6592,7 @@ file_perm_dealloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, const VPID * vp
   assert (page_ftab == NULL);
 
   /* almost done. We need to update header statistics */
-  file_header_dealloc (fhead, alloc_type, is_empty, was_full);
+  file_header_dealloc (fhead, alloc_type, is_empty, was_full); // full -> part sect로 가는 내용 header에 기록
   save_page_lsa = *pgbuf_get_lsa (page_fhead);
   file_log_fhead_dealloc (thread_p, page_fhead, alloc_type, is_empty, was_full);
 
@@ -6675,7 +6677,7 @@ file_rv_dealloc_internal (THREAD_ENTRY * thread_p, LOG_RCV * rcv, bool compensat
   fhead = (FILE_HEADER *) page_fhead;
   file_header_sanity_check (thread_p, fhead);
 
-  if (FILE_IS_TEMPORARY (fhead))
+  if (FILE_IS_TEMPORARY (fhead)) // temp_file은 dealloc할 일이 없음
     {
       /* no need to actually deallocate page. should not even be here. */
       assert (false);
@@ -6688,7 +6690,7 @@ file_rv_dealloc_internal (THREAD_ENTRY * thread_p, LOG_RCV * rcv, bool compensat
   is_sysop_started = true;
 
   /* clear page bit by calling file_perm_dealloc */
-  error_code = file_perm_dealloc (thread_p, page_fhead, vpid_dealloc, FILE_ALLOC_USER_PAGE);
+  error_code = file_perm_dealloc (thread_p, page_fhead, vpid_dealloc, FILE_ALLOC_USER_PAGE); // perm_file dealloc
   if (error_code != NO_ERROR)
     {
       /* We cannot allow errors during recovery! */
@@ -7126,7 +7128,7 @@ file_is_temp (THREAD_ENTRY * thread_p, const VFID * vfid, bool * is_temp)
 STATIC_INLINE int
 file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, bool collect_numerable,
 			       FILE_FTAB_COLLECTOR * collector_out)
-{
+{ // ftab 페이지들이 포함된 sector collect
   VPID vpid_fhead;
   FILE_HEADER *fhead = NULL;
   FILE_EXTENSIBLE_DATA *extdata_ftab;
@@ -7136,7 +7138,7 @@ file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, boo
 
   /* init collector */
   collector_out->partsect_ftab =
-    (FILE_PARTIAL_SECTOR *) db_private_alloc (thread_p, sizeof (FILE_PARTIAL_SECTOR) * fhead->n_page_ftab);
+    (FILE_PARTIAL_SECTOR *) db_private_alloc (thread_p, sizeof (FILE_PARTIAL_SECTOR) * fhead->n_page_ftab); // fhead의 ftab 개수만큼 ftab 배열 malloc
   if (collector_out->partsect_ftab == NULL)
     {
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1,
@@ -7145,13 +7147,13 @@ file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, boo
     }
 
   /* add page header */
-  pgbuf_get_vpid (page_fhead, &vpid_fhead);
-  VSID_FROM_VPID (&collector_out->partsect_ftab[0].vsid, &vpid_fhead);
-  collector_out->partsect_ftab[0].page_bitmap = FILE_EMPTY_PAGE_BITMAP;
+  pgbuf_get_vpid (page_fhead, &vpid_fhead); // fhead 페이지에서 vpid 획득
+  VSID_FROM_VPID (&collector_out->partsect_ftab[0].vsid, &vpid_fhead); // vpid -> vsid 얻어서 0번째 인덱스에 할당
+  collector_out->partsect_ftab[0].page_bitmap = FILE_EMPTY_PAGE_BITMAP; // [질문] bitmap을 왜 다 0으로 초기화할까? [추측] fhead의 페이지 비트를 활성화하려고 초기화하는듯
   file_partsect_set_bit (&collector_out->partsect_ftab[0],
-			 file_partsect_pageid_to_offset (&collector_out->partsect_ftab[0], vpid_fhead.pageid));
-  collector_out->nsects = 1;
-  collector_out->npages = 1;
+			 file_partsect_pageid_to_offset (&collector_out->partsect_ftab[0], vpid_fhead.pageid)); // collector_out 배열의 첫 섹터에서 fhead 위치와 동일한 페이지비트 1로 활성화
+  collector_out->nsects = 1; // 위에서 fhead 페이지 활성화했으니 sector 개수 1
+  collector_out->npages = 1; // 위에서 fhead 페이지 활성화했으니 page 개수 1
 
   file_log ("file_temp_reset_user_pages",
 	    "init collector with page %d|%d \n "
@@ -7159,8 +7161,8 @@ file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, boo
 	    FILE_PARTSECT_AS_ARGS (collector_out->partsect_ftab));
 
   /* add other pages in partial sector table */
-  FILE_HEADER_GET_PART_FTAB (fhead, extdata_ftab);
-  error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, collector_out, NULL,
+  FILE_HEADER_GET_PART_FTAB (fhead, extdata_ftab); // partial_ftab 획득
+  error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, collector_out, NULL, // collector_out에 part_ftab 수집
 					 NULL, false, NULL, NULL);
   if (error_code != NO_ERROR)
     {
@@ -7172,8 +7174,8 @@ file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, boo
   if (!FILE_IS_TEMPORARY (fhead))
     {
       /* add other pages from full sector table */
-      FILE_HEADER_GET_FULL_FTAB (fhead, extdata_ftab);
-      error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, collector_out,
+      FILE_HEADER_GET_FULL_FTAB (fhead, extdata_ftab); // full_ftab 획득
+      error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, file_extdata_collect_ftab_pages, collector_out, // collector_out에 full_ftab 수집
 					     NULL, NULL, false, NULL, NULL);
       if (error_code != NO_ERROR)
 	{
@@ -7211,7 +7213,7 @@ file_table_collect_ftab_pages (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, boo
  */
 static int
 file_extdata_collect_ftab_pages (THREAD_ENTRY * thread_p, const FILE_EXTENSIBLE_DATA * extdata, bool * stop, void *args)
-{
+{ // 코드로만 봤을 땐 args로 넘어온 collect 안의 값을 extdata->vpid_next의 partial_sector_table로 채워주는 듯
   FILE_FTAB_COLLECTOR *collect = (FILE_FTAB_COLLECTOR *) args;
   VSID vsid_this;
   int idx_sect = 0;
@@ -7267,11 +7269,11 @@ file_table_collector_has_page (FILE_FTAB_COLLECTOR * collector, VPID * vpid)
 
   VSID_FROM_VPID (&vsid, vpid);
 
-  for (iter = 0; iter < collector->nsects; iter++)
+  for (iter = 0; iter < collector->nsects; iter++) // collector에 속한 sector들 순회
     {
-      if (VSID_EQ (&vsid, &collector->partsect_ftab[iter].vsid))
+      if (VSID_EQ (&vsid, &collector->partsect_ftab[iter].vsid)) // vpid에 해당하는 sector와 일치한다면
 	{
-	  return file_partsect_is_bit_set (&collector->partsect_ftab[iter],
+	  return file_partsect_is_bit_set (&collector->partsect_ftab[iter], // vpid에 해당하는 page_bit가 활성화 되어 있으면 true 반환
 					   file_partsect_pageid_to_offset (&collector->partsect_ftab[iter],
 									   vpid->pageid));
 	}
@@ -7285,14 +7287,14 @@ file_table_collector_has_page (FILE_FTAB_COLLECTOR * collector, VPID * vpid)
  *
  * return        : error code
  * thread_p (in) : thread entry
- * data (in)     : FILE_PARTIAL_SECTOR or VSID
+ * data (in)     : FILE_PARTIAL_SECTOR or VSID // part_sector나 full_sector가 전달됨
  * index (in)    : ignored
  * stop (out)    : output true when to stop the mapping
  * args (in)     : map context
  */
 static int
 file_sector_map_pages (THREAD_ENTRY * thread_p, const void *data, int index, bool * stop, void *args)
-{
+{ // 전달된 sector의 page들을 순회하면서 조건에 맞을 경우 args(context)에 담긴 func 수행. 여기서 func는 다른 모듈 func일 수 있음
   FILE_MAP_CONTEXT *context = (FILE_MAP_CONTEXT *) args;
   FILE_PARTIAL_SECTOR partsect = FILE_PARTIAL_SECTOR_INITIALIZER;
   int iter;
@@ -7318,31 +7320,31 @@ file_sector_map_pages (THREAD_ENTRY * thread_p, const void *data, int index, boo
    */
 
   /* hack to know this is partial table or full table */
-  if (context->is_partial)
+  if (context->is_partial) // context에 담긴 sector가 partial_sector라면
     {
       partsect = *(FILE_PARTIAL_SECTOR *) data;
     }
-  else
+  else // context에 담긴 sector가 full_sector라면
     {
       partsect.vsid = *(VSID *) data;
     }
 
   vpid.volid = partsect.vsid.volid;
-  for (iter = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); iter < FILE_ALLOC_BITMAP_NBITS;
+  for (iter = 0, vpid.pageid = SECTOR_FIRST_PAGEID (partsect.vsid.sectid); iter < FILE_ALLOC_BITMAP_NBITS; // sector에 속한 page들을 순회
        iter++, vpid.pageid++)
     {
-      if (context->is_partial && !file_partsect_is_bit_set (&partsect, iter))
+      if (context->is_partial && !file_partsect_is_bit_set (&partsect, iter)) // part_sector이고, iter에 해당하는 page_bit가 활성화되어 있지 않으면
 	{
 	  /* not allocated */
-	  continue;
+	  continue; // 건너뜀
 	}
 
-      if (file_table_collector_has_page (&context->ftab_collector, &vpid))
+      if (file_table_collector_has_page (&context->ftab_collector, &vpid)) // full_sector이고, iter에 해당하는 페이지 비트가 활성화 되어 있다면
 	{
 	  /* skip table pages */
-	  continue;
+	  continue; // 건너뜀
 	}
-
+      // 여기로 올 수 있는 경우는 2가지. part-page_bit 활성화 or full-page_bit 활성화X
       page = pgbuf_fix (thread_p, &vpid, OLD_PAGE, context->latch_mode, context->latch_cond);
       if (page == NULL)
 	{
@@ -7359,7 +7361,7 @@ file_sector_map_pages (THREAD_ENTRY * thread_p, const void *data, int index, boo
       assert (pgbuf_get_page_ptype (thread_p, page) != PAGE_FTAB);
 
       /* call map function */
-      error_code = context->func (thread_p, &page, stop, context->args);
+      error_code = context->func (thread_p, &page, stop, context->args); // context에 담긴 함수를 실행해줌. 여기 담긴 함수는 다른 모듈일 수도 있음(예: catalog.. 등등)
       if (page != NULL)
 	{
 	  pgbuf_unfix_and_init (thread_p, page);
@@ -7435,10 +7437,10 @@ file_map_pages (THREAD_ENTRY * thread_p, const VFID * vfid, PGBUF_LATCH_MODE lat
       return error_code;
     }
   fhead = (FILE_HEADER *) page_fhead;
-  file_header_sanity_check (thread_p, fhead);
+  file_header_sanity_check (thread_p, fhead); // fhead-ftab sector 맞는지 체크
 
   /* init map context */
-  context.func = func;
+  context.func = func; // 전달된 func 할당 (file map에 사용되는 함수를 지정하는 것 같음)
   context.args = args;
   context.latch_cond = latch_cond;
   context.latch_mode = latch_mode;
@@ -7446,7 +7448,7 @@ file_map_pages (THREAD_ENTRY * thread_p, const VFID * vfid, PGBUF_LATCH_MODE lat
   context.ftab_collector.partsect_ftab = NULL;
 
   /* collect table pages */
-  error_code = file_table_collect_ftab_pages (thread_p, page_fhead, true, &context.ftab_collector);
+  error_code = file_table_collect_ftab_pages (thread_p, page_fhead, true, &context.ftab_collector); // context의 ftab collector에 page_fhead에 달린 sector_ftab 모두 담아줌
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
@@ -7456,7 +7458,7 @@ file_map_pages (THREAD_ENTRY * thread_p, const VFID * vfid, PGBUF_LATCH_MODE lat
   /* map over partial sectors table */
   FILE_HEADER_GET_PART_FTAB (fhead, extdata_ftab);
   context.is_partial = true;
-  error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, NULL, NULL, file_sector_map_pages, &context, false,
+  error_code = file_extdata_apply_funcs (thread_p, extdata_ftab, NULL, NULL, file_sector_map_pages, &context, false, // context->func 활용해서 필요한 sector를 file_sector_map_pages() 함수로 순회
 					 NULL, NULL);
   if (error_code != NO_ERROR)
     {
@@ -8675,15 +8677,15 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 
   file_log ("file_temp_alloc", "%s", FILE_ALLOC_TYPE_STRING (alloc_type));
 
-  FILE_GET_HEADER_VPID (&fhead->self, &vpid_fhead);
+  FILE_GET_HEADER_VPID (&fhead->self, &vpid_fhead); // temp_file은 이상한게 sector를 하나씩(page는 64개씩) 할당받음
 
   /* get page for last allocated partial table */
-  if (VPID_EQ (&vpid_fhead, &fhead->vpid_last_temp_alloc))
-    {
+  if (VPID_EQ (&vpid_fhead, &fhead->vpid_last_temp_alloc)) // 마지막으로 할당한 ftab의 페이지가 fhead라면
+    {                                                      // [refactor] 처음 file_create 할 때 vpid_last_temp_alloc를 NULL_VPID로 설정해놓으면 새로운 ftab 페이지를 할당한 적이 있는지 없는지 한 번에 구분 가능할 것 같음
       /* partial table in header */
-      FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab);
+      FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab); // fhead에서 part_ftab 시작 위치 획득
     }
-  else
+  else // 마지막으로 할당한 ftab의 페이지가 fhead와 다르다면 해당 페이지 fix
     {
       page_ftab =
 	pgbuf_fix (thread_p, &fhead->vpid_last_temp_alloc, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
@@ -8697,17 +8699,17 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 
 	  goto exit;
 	}
-      extdata_part_ftab = (FILE_EXTENSIBLE_DATA *) page_ftab;
+      extdata_part_ftab = (FILE_EXTENSIBLE_DATA *) page_ftab; // 마지막으로 alloc된 temp_file의 partial_ftab으로 획득. 파라미터로 전달된 temp_file은 이미 가득 찼다고 판단
     }
 
-  if (fhead->n_page_free == 0)
+  if (fhead->n_page_free == 0) // 섹터를 다 써서 더 이상 할당해줄 page가 없다면 new 섹터 할당
     {
       /* expand file by one sector */
       FILE_PARTIAL_SECTOR partsect_new = FILE_PARTIAL_SECTOR_INITIALIZER;
 
       /* reserve a sector */
       error_code =
-	disk_reserve_sectors (thread_p, DB_TEMPORARY_DATA_PURPOSE, fhead->volid_last_expand, 1, &partsect_new.vsid);
+	disk_reserve_sectors (thread_p, DB_TEMPORARY_DATA_PURPOSE, fhead->volid_last_expand, 1, &partsect_new.vsid); // 새로운 섹터 예약
       if (error_code != NO_ERROR)
 	{
 	  error_code = er_errid ();
@@ -8724,7 +8726,7 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 		FILE_HEAD_ALLOC_AS_ARGS (fhead), VSID_AS_ARGS (&partsect_new.vsid));
 
       assert (extdata_part_ftab != NULL);
-      if (file_extdata_is_full (extdata_part_ftab))
+      if (file_extdata_is_full (extdata_part_ftab)) // 마지막으로 할당한 ftab에 item이 가득 찼다면 새로 할당받은 섹터의 첫 페이지 사용
 	{
 	  /* we need a new page. */
 	  /* we will use first page of newly reserved sector. */
@@ -8732,8 +8734,8 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 	  PAGE_PTR page_ftab_new = NULL;
 
 	  vpid_ftab_new.volid = partsect_new.vsid.volid;
-	  vpid_ftab_new.pageid = SECTOR_FIRST_PAGEID (partsect_new.vsid.sectid);
-	  file_partsect_set_bit (&partsect_new, 0);
+	  vpid_ftab_new.pageid = SECTOR_FIRST_PAGEID (partsect_new.vsid.sectid); // 위에서 새로 할당받은 섹터의 첫 페이지를 new ftab 페이지로 사용
+	  file_partsect_set_bit (&partsect_new, 0); // 새로 할당받은 섹터의 첫 페이지를 ftab 페이지로 썼으니 0번째 페이지 활성화
 
 	  /* fix new file table page */
 	  page_ftab_new = pgbuf_fix (thread_p, &vpid_ftab_new, NEW_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
@@ -8744,31 +8746,31 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 	      /* todo: unreserve sector */
 	      goto exit;
 	    }
-	  pgbuf_set_page_ptype (thread_p, page_ftab_new, PAGE_FTAB);
+	  pgbuf_set_page_ptype (thread_p, page_ftab_new, PAGE_FTAB); // 페이지 타입을 new_ftab 페이지로 설정
 
 	  /* set link to previous page. */
-	  VPID_COPY (&extdata_part_ftab->vpid_next, &vpid_ftab_new);
+	  VPID_COPY (&extdata_part_ftab->vpid_next, &vpid_ftab_new); // 새로 사용하는 ftab 페이지를 last_ftab->vpid_next에 연결
 
 	  /* we don't need old file table page anymore */
 	  assert (page_ftab != page_fhead);
-	  if (page_ftab != NULL)
+	  if (page_ftab != NULL) // fhead와 last_ftab 페이지가 다른 경우
 	    {
-	      pgbuf_set_dirty_and_free (thread_p, page_ftab);
+	      pgbuf_set_dirty_and_free (thread_p, page_ftab); // 여기서 dirty+free 하는 이유는 2가지 1. last_ftab에 vpid_next를 지정했기 때문에 저장하기 위해 dirty 2. 새로운 page로 last_ftab을 지정했기 때문에 더이상 필요하지 않아서 free
 	    }
 
 	  VPID_COPY (&fhead->vpid_last_temp_alloc, &vpid_ftab_new);
-	  fhead->offset_to_last_temp_alloc = 0;
+	  fhead->offset_to_last_temp_alloc = 0; // ftab 페이지 새로 할당했으니 offset은 0으로 설정
 	  pgbuf_set_dirty (thread_p, page_fhead, DONT_FREE);
 
-	  page_ftab = page_ftab_new;
+	  page_ftab = page_ftab_new; // 위에서 새로 할당받은 ftab 페이지
 	  extdata_part_ftab = (FILE_EXTENSIBLE_DATA *) page_ftab;
-	  file_extdata_init (sizeof (FILE_PARTIAL_SECTOR), DB_PAGESIZE, extdata_part_ftab);
+	  file_extdata_init (sizeof (FILE_PARTIAL_SECTOR), DB_PAGESIZE, extdata_part_ftab); // 위에서 할당받은 ftab 초기화
 
 	  file_log ("file_temp_alloc",
 		    "used newly reserved sector's first page %d|%d for partial table.", VPID_AS_ARGS (&vpid_ftab_new));
 
 	  /* update temporary file stats - DISK_SECTOR_NPAGES -1 reserved pages and 1 file table page. */
-	  ATOMIC_INC_32 (&file_Tempcache.spacedb_temp.npage_reserved, DISK_SECTOR_NPAGES - 1);
+	  ATOMIC_INC_32 (&file_Tempcache.spacedb_temp.npage_reserved, DISK_SECTOR_NPAGES - 1); // 전역 캐시 file_Tempcache에 page 수 설정
 	  ATOMIC_INC_32 (&file_Tempcache.spacedb_temp.npage_ftab, 1);
 	}
       else
@@ -8778,17 +8780,17 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 	}
       assert (!file_extdata_is_full (extdata_part_ftab));
       assert (file_extdata_item_count (extdata_part_ftab) == fhead->offset_to_last_temp_alloc);
-      file_extdata_append (extdata_part_ftab, &partsect_new);
+      file_extdata_append (extdata_part_ftab, &partsect_new); // ftab에 새로 할당받은 섹터 item 추가
 
-      fhead->n_sector_partial++;
+      fhead->n_sector_partial++; // fhead값 조정
       fhead->n_sector_total++;
       fhead->n_page_free += DISK_SECTOR_NPAGES;
       fhead->n_page_total += DISK_SECTOR_NPAGES;
-      if (partsect_new.page_bitmap == FILE_EMPTY_PAGE_BITMAP)
+      if (partsect_new.page_bitmap == FILE_EMPTY_PAGE_BITMAP) // 섹터는 새로 받았지만 ftab 페이지로 새로 할당하지 않은 경우
 	{
 	  fhead->n_sector_empty++;
 	}
-      else
+      else // 섹터도 새로 받고, ftab 페이지 새로 할당한 경우
 	{
 	  fhead->n_page_free--;
 	  fhead->n_page_ftab++;
@@ -8802,10 +8804,10 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
     }
   assert (fhead->n_page_free > 0);
 
-  if (fhead->offset_to_last_temp_alloc == file_extdata_item_count (extdata_part_ftab))
-    {
-      VPID vpid_next;
-
+  if (fhead->offset_to_last_temp_alloc == file_extdata_item_count (extdata_part_ftab)) // ftab의 item을 다 썼다면 새로운 페이지를 할당해서 ftab->vpid_next로 지정
+    {                                                                                  // [질문] ftab의 섹터를 다 썼으면 새로운 item을 붙이면 되는거 아닌가? file_extdata_is_full() 함수를 호출해서 확인해야 맞지 않나?
+      VPID vpid_next;                                                                  // [추측] 위에서 full 여부에 따라 page 할당을 진행하기 때문에 last_..alloc과 item 개수가 동일할 수 없음. 동일하다는건 full 상태를 나타냄. 근데 코드가 ㅈ같은건 사실임.
+                                                                                       // [refactor] 위 로직에 의지하여 조건문을 표기하였기 때문에 file_extdata_is_full (extdata_part_ftab)로 조건 검사하면 훨씬 가독성이 좋아질 것 같음
       /* must be full */
       assert (file_extdata_is_full (extdata_part_ftab));
       /* we must have another extensible data */
@@ -8836,24 +8838,24 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
 
   assert (extdata_part_ftab != NULL);
   assert (fhead->offset_to_last_temp_alloc < file_extdata_item_count (extdata_part_ftab));
-  partsect = (FILE_PARTIAL_SECTOR *) file_extdata_at (extdata_part_ftab, fhead->offset_to_last_temp_alloc);
+  partsect = (FILE_PARTIAL_SECTOR *) file_extdata_at (extdata_part_ftab, fhead->offset_to_last_temp_alloc); // 사용중인 part_sect 지정
 
   /* Allocate the page. */
-  was_empty = file_partsect_is_empty (partsect);
-  if (!file_partsect_alloc (partsect, vpid_alloc_out, NULL))
+  was_empty = file_partsect_is_empty (partsect); // 빈 섹터에서 새로운 페이지를 할당한다면 true(안 중요)
+  if (!file_partsect_alloc (partsect, vpid_alloc_out, NULL)) // 섹터의 빈 페이지 찾아서 반환하고, page_bit 활성화
     {
       /* full sector? that is unexpected. we must have a logic error. */
       assert_release (false);
       error_code = ER_FAILED;
       goto exit;
     }
-  if (file_partsect_is_full (partsect))
+  if (file_partsect_is_full (partsect)) // 섹터의 page를 다 썼다면
     {
       is_full = true;
-      fhead->offset_to_last_temp_alloc++;
+      fhead->offset_to_last_temp_alloc++; // 마지막으로 alloc하고 있는 part_sect 인덱스 ++
     }
 
-  file_header_alloc (fhead, alloc_type, was_empty, is_full);
+  file_header_alloc (fhead, alloc_type, was_empty, is_full); // fhead값 조정
   pgbuf_set_dirty (thread_p, page_fhead, DONT_FREE);
 
   file_log ("file_temp_alloc", "%s %d|%d successful. \n" FILE_HEAD_FULL_MSG
@@ -8868,11 +8870,11 @@ file_temp_alloc (THREAD_ENTRY * thread_p, PAGE_PTR page_fhead, FILE_ALLOC_TYPE a
     }
 
   /* update temporary file stats */
-  if (alloc_type == FILE_ALLOC_USER_PAGE)
+  if (alloc_type == FILE_ALLOC_USER_PAGE) // 일반적인 numerable temp_file alloc인 경우
     {
       ATOMIC_INC_32 (&file_Tempcache.spacedb_temp.npage_user, 1);
     }
-  else
+  else // numerable temp_file alloc인 경우
     {
       ATOMIC_INC_32 (&file_Tempcache.spacedb_temp.npage_ftab, 1);
     }
@@ -8901,7 +8903,7 @@ exit:
  */
 STATIC_INLINE int
 file_temp_set_type (THREAD_ENTRY * thread_p, VFID * vfid, FILE_TYPE ftype)
-{
+{ // vfiddㅢ fhead에 ftype 설정
   VPID vpid_fhead;
   PAGE_PTR page_fhead = NULL;
   FILE_HEADER *fhead = NULL;
@@ -8970,7 +8972,7 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
       ASSERT_ERROR_AND_SET (error_code);
       goto exit;
     }
-  fhead = (FILE_HEADER *) page_fhead;
+  fhead = (FILE_HEADER *) page_fhead; // vfid의 fhead 획득
   file_header_sanity_check (thread_p, fhead);
 
   if (!FILE_IS_TEMPORARY (fhead))
@@ -8980,7 +8982,7 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
       goto exit;
     }
 
-  if (FILE_IS_NUMERABLE (fhead))
+  if (FILE_IS_NUMERABLE (fhead)) // numerable_temp_file이면
     {
       /* reset user page table */
       FILE_HEADER_GET_USER_PAGE_FTAB (fhead, extdata_user_page_ftab);
@@ -8992,7 +8994,7 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
     }
 
   /* collect table pages */
-  error_code = file_table_collect_ftab_pages (thread_p, page_fhead, false, &collector);
+  error_code = file_table_collect_ftab_pages (thread_p, page_fhead, false, &collector); // ftab 페이지를 담은 sector들을 collector에 수집
   if (error_code != NO_ERROR)
     {
       assert_release (false);
@@ -9003,7 +9005,7 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
   FILE_HEADER_GET_PART_FTAB (fhead, extdata_part_ftab);
   is_partial = true;
   error_code =
-    file_extdata_apply_funcs (thread_p, extdata_part_ftab, NULL, NULL, file_sector_map_dealloc_temp, &is_partial, true,
+    file_extdata_apply_funcs (thread_p, extdata_part_ftab, NULL, NULL, file_sector_map_dealloc_temp, &is_partial, true, // 모든 ftab을 순회하면서 sector의 page 중 활성화 된 page를 dealloc함
 			      NULL, NULL);
   if (error_code != NO_ERROR)
     {
@@ -9011,9 +9013,9 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
       goto exit;
     }
 
-  /* count partial, full, empty */
+  /* count partial, full, empty */ // [질문] temp에 full이 있을 수 있나? [추측] temp에 full_sect는 없어도 full된 part_sect는 있을듯
   nsect_full_new = 0;
-  for (idx_sect = 0; idx_sect < collector.nsects; idx_sect++)
+  for (idx_sect = 0; idx_sect < collector.nsects; idx_sect++) // collect된 sector들 순회하면서 full이 몇 개인지 파악
     {
       if (collector.partsect_ftab[idx_sect].page_bitmap == FILE_FULL_PAGE_BITMAP)
 	{
@@ -9031,12 +9033,12 @@ file_temp_reset_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid)
     {
       assert (extdata_part_ftab != NULL);
 
-      for (partsect = (FILE_PARTIAL_SECTOR *) file_extdata_start (extdata_part_ftab);
+      for (partsect = (FILE_PARTIAL_SECTOR *) file_extdata_start (extdata_part_ftab); // extdata_part_ftab의 첫 sector부터 마지막 sector까지 순회
 	   partsect < (FILE_PARTIAL_SECTOR *) file_extdata_end (extdata_part_ftab); partsect++)
 	{
 	  /* does it have file table pages? */
 	  found = false;
-	  for (idx_sect = 0; idx_sect < collector.nsects; idx_sect++)
+	  for (idx_sect = 0; idx_sect < collector.nsects; idx_sect++) // 섹터 내에 ftab 페이지를 가지고 있다면 reset 건너뜀
 	    {
 	      if (disk_compare_vsids (&partsect->vsid, &collector.partsect_ftab[idx_sect].vsid) == 0)
 		{
@@ -9142,14 +9144,14 @@ file_temp_preserve (THREAD_ENTRY * thread_p, const VFID * vfid)
 
   assert (vfid != NULL && !VFID_ISNULL (vfid));
 
-  entry = file_tempcache_pop_tran_file (thread_p, vfid);
+  entry = file_tempcache_pop_tran_file (thread_p, vfid); // tran_index에 해다하는 tran_entry에서 vfid에 해당하는 entry 삭제
   if (entry == NULL)
     {
       assert_release (false);
     }
   else
     {
-      file_tempcache_retire_entry (entry);
+      file_tempcache_retire_entry (entry); // free_entry에 삽입하거나 free(). [질문] 왜 cached_entry에는 삽입하지 않지?
     }
 }
 
@@ -9164,7 +9166,7 @@ file_temp_preserve (THREAD_ENTRY * thread_p, const VFID * vfid)
  */
 static int
 file_tempcache_init (void)
-{
+{ // 전역 file_Tempcache 초기화
   int memsize = 0;
 #if defined (SERVER_MODE)
   int ntrans = logtb_get_number_of_total_tran_indices () + 1;
@@ -9195,14 +9197,14 @@ file_tempcache_init (void)
 
   /* allocate transaction temporary files lists */
   memsize = ntrans * sizeof (FILE_TEMPCACHE_TRAN_ENTRY);
-  file_Tempcache.tran_files = (FILE_TEMPCACHE_TRAN_ENTRY *) malloc (memsize);
+  file_Tempcache.tran_files = (FILE_TEMPCACHE_TRAN_ENTRY *) malloc (memsize); // 전역 변수에 transaction 개수 * 엔트리 사이즈 만큼 malloc
   if (file_Tempcache.tran_files == NULL)
     {
       pthread_mutex_destroy (&file_Tempcache.mutex);
       er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1, memsize);
       return ER_OUT_OF_VIRTUAL_MEMORY;
     }
-  memset (file_Tempcache.tran_files, 0, memsize);
+  memset (file_Tempcache.tran_files, 0, memsize); // 위에서 malloc한 tran_files 배열 0으로 초기화
 
 
   for (int i = 0; i < ntrans; i++)
@@ -9214,7 +9216,7 @@ file_tempcache_init (void)
     }
 
   /* stats */
-  memset (&file_Tempcache.spacedb_temp, 0, sizeof (file_Tempcache.spacedb_temp));
+  memset (&file_Tempcache.spacedb_temp, 0, sizeof (file_Tempcache.spacedb_temp)); // file_Tempcache의 spacedb를 위한 memory도 0으로 초기화
 
   /* all ok */
   return NO_ERROR;
@@ -9227,7 +9229,7 @@ file_tempcache_init (void)
  */
 static void
 file_tempcache_final (void)
-{
+{ // TODO: server stop 시 호출되는지 확인
   int tran = 0;
   int ntrans;
 
@@ -9243,19 +9245,19 @@ file_tempcache_final (void)
   ntrans = 1;
 #endif
 
-  file_tempcache_lock ();
+  file_tempcache_lock (); // file_Tempcache 자체에 mutex lock
 
   /* free all transaction lists... they should be empty anyway, but be conservative */
-  for (tran = 0; tran < ntrans; tran++)
+  for (tran = 0; tran < ntrans; tran++) // 모든 트랜잭션 인덱스 순회
     {
-      file_tempcache_lock_tran_entry (&file_Tempcache.tran_files[tran]);
-      if (file_Tempcache.tran_files[tran].head != NULL)
+      file_tempcache_lock_tran_entry (&file_Tempcache.tran_files[tran]); // tran_files 배열의 tran 인덱스에 lock
+      if (file_Tempcache.tran_files[tran].head != NULL) // tran index에 temp_cache entry가 매달려 있다면
 	{
 	  /* should be empty */
-	  file_tempcache_free_entry_list (&file_Tempcache.tran_files[tran].head);
+	  file_tempcache_free_entry_list (&file_Tempcache.tran_files[tran].head); // tran_files 배열의 tran 인덱스의 tempcache 엔트리 자체를 메모리 해제
 	}
-      file_tempcache_unlock_tran_entry (&file_Tempcache.tran_files[tran]);
-      pthread_mutex_destroy (&file_Tempcache.tran_files[tran].mutex);
+      file_tempcache_unlock_tran_entry (&file_Tempcache.tran_files[tran]); // tran_files 배열의 tran 인덱스에 다시 unlock
+      pthread_mutex_destroy (&file_Tempcache.tran_files[tran].mutex); // tran_files 배열의 tran 인덱스의 mutex 자체를 destroy
     }
   free_and_init (file_Tempcache.tran_files);
 
@@ -9265,9 +9267,9 @@ file_tempcache_final (void)
 
   file_tempcache_free_entry_list (&file_Tempcache.free_entries);
 
-  file_tempcache_unlock ();
+  file_tempcache_unlock (); // file_Tempcache에서 mutex unlock
 
-  pthread_mutex_destroy (&file_Tempcache.mutex);
+  pthread_mutex_destroy (&file_Tempcache.mutex); // file_Tempcache 자체의 mutex도 destroy
 }
 
 /*
@@ -9278,7 +9280,7 @@ file_tempcache_final (void)
  */
 STATIC_INLINE void
 file_tempcache_free_entry_list (FILE_TEMPCACHE_ENTRY ** list)
-{
+{ // entry에 달린 temp_cache list를 순회하면서 free() 처리
   FILE_TEMPCACHE_ENTRY *entry;
   FILE_TEMPCACHE_ENTRY *next;
 
@@ -9287,7 +9289,7 @@ file_tempcache_free_entry_list (FILE_TEMPCACHE_ENTRY ** list)
   for (entry = *list; entry != NULL; entry = next)
     {
       next = entry->next;
-      free (entry);
+      free (entry); // entry 자체를 free해서 메모리 할당 해제
     }
   *list = NULL;
 }
@@ -9300,18 +9302,18 @@ file_tempcache_free_entry_list (FILE_TEMPCACHE_ENTRY ** list)
  */
 STATIC_INLINE int
 file_tempcache_alloc_entry (FILE_TEMPCACHE_ENTRY ** entry)
-{
+{ // file_Tempcache.cache에 공간 malloc
   file_tempcache_check_lock ();
 
-  if (file_Tempcache.free_entries != NULL)
+  if (file_Tempcache.free_entries != NULL) // free_entry에 남은 entry가 있으면 그걸 그대로 사용
     {
       assert (file_Tempcache.nfree_entries > 0);
 
       *entry = file_Tempcache.free_entries;
-      file_Tempcache.free_entries = file_Tempcache.free_entries->next;
-      file_Tempcache.nfree_entries--;
+      file_Tempcache.free_entries = file_Tempcache.free_entries->next; // free_entries에서 대여해줄 entry 삭제
+      file_Tempcache.nfree_entries--; // entry 대여해주고 free entry 개수 -1
     }
-  else
+  else // free_entry가 없으면 cache 엔트리에 malloc
     {
       *entry = (FILE_TEMPCACHE_ENTRY *) malloc (sizeof (FILE_TEMPCACHE_ENTRY));
       if (*entry == NULL)
@@ -9321,7 +9323,7 @@ file_tempcache_alloc_entry (FILE_TEMPCACHE_ENTRY ** entry)
 	}
     }
 
-  (*entry)->next = NULL;
+  (*entry)->next = NULL; // entry 필드값 초기화
   VFID_SET_NULL (&(*entry)->vfid);
   (*entry)->ftype = FILE_UNKNOWN_TYPE;
 
@@ -9336,7 +9338,7 @@ file_tempcache_alloc_entry (FILE_TEMPCACHE_ENTRY ** entry)
  */
 STATIC_INLINE void
 file_tempcache_retire_entry (FILE_TEMPCACHE_ENTRY * entry)
-{
+{ // free_entries에 자리가 있으면 free_entries에 entry 삽입. 자리 없으면 free로 메모리 할당 해제
   /* we lock to change free entry list */
   file_tempcache_lock ();
 
@@ -9361,12 +9363,12 @@ file_tempcache_retire_entry (FILE_TEMPCACHE_ENTRY * entry)
  */
 STATIC_INLINE void
 file_tempcache_lock (void)
-{
+{ // file_Tempcache 자체에 mutex lock
   assert (file_Tempcache.owner_mutex != thread_get_current_entry_index ());
-  pthread_mutex_lock (&file_Tempcache.mutex);
+  pthread_mutex_lock (&file_Tempcache.mutex); // file_Tempcache에 mutex lock
   assert (file_Tempcache.owner_mutex == -1);
 #if !defined (NDEBUG)
-  file_Tempcache.owner_mutex = thread_get_current_entry_index ();
+  file_Tempcache.owner_mutex = thread_get_current_entry_index (); // 현재 트랜잭션의 인덱스 번호를 표기하여 현재 트랜잭션이 mutex lock을 소유하고 있다고 알림
 #endif /* !NDEBUG */
 }
 
@@ -9407,18 +9409,18 @@ file_tempcache_check_lock (void)
  */
 STATIC_INLINE int
 file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FILE_TEMPCACHE_ENTRY ** entry)
-{
+{ // tempcache 리스트에서 엔트리 대여
   int error_code = NO_ERROR;
 
   assert (entry != NULL && *entry == NULL);
 
   file_tempcache_lock ();
 
-  *entry = numerable ? file_Tempcache.cached_numerable : file_Tempcache.cached_not_numerable;
-  if (*entry != NULL && (*entry)->ftype != ftype)
-    {
+  *entry = numerable ? file_Tempcache.cached_numerable : file_Tempcache.cached_not_numerable; // numerable 여부에 따라 caching 되어 있는 빈 엔트리를 획득
+  if (*entry != NULL && (*entry)->ftype != ftype) // caching된 entry가 존재할 경우
+    {                                            // [참고]한 번도 Tempcache가 생성된 적 없으면 entry가 NULL일 수 있음
       /* change type */
-      error_code = file_temp_set_type (thread_p, &(*entry)->vfid, ftype);
+      error_code = file_temp_set_type (thread_p, &(*entry)->vfid, ftype); // entry->vfid의 fhead를 파라미터 ftype으로 설정(FILE_TEMP or FILE_QUERY_AREA)
       if (error_code != NO_ERROR)
 	{
 	  /* could not change it, give up */
@@ -9430,7 +9432,7 @@ file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FI
 	}
     }
 
-  if (*entry != NULL)
+  if (*entry != NULL) // file_Tempcache에 caching된 entry가 존재한다면 entry_list에서 entry 하나를 빼서 반환
     {
       /* remove from cache */
       if (numerable)
@@ -9446,8 +9448,8 @@ file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FI
 	  assert (*entry == file_Tempcache.cached_not_numerable);
 	  assert (file_Tempcache.ncached_not_numerable > 0);
 
-	  file_Tempcache.cached_not_numerable = file_Tempcache.cached_not_numerable->next;
-	  file_Tempcache.ncached_not_numerable--;
+	  file_Tempcache.cached_not_numerable = file_Tempcache.cached_not_numerable->next; // file_Tempcache의 not_numerable entry 리스트에서 대여해줄 entry는 제거
+	  file_Tempcache.ncached_not_numerable--; // 대여하기 위해 entry를 하나 뺐으니 -1
 	}
 
       (*entry)->next = NULL;
@@ -9458,12 +9460,13 @@ file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FI
 		FILE_TEMPCACHE_ENTRY_AS_ARGS (*entry), numerable ? "numerable" : "regular", FILE_TEMPCACHE_AS_ARGS);
 
       file_tempcache_unlock ();
-      return NO_ERROR;
+      return NO_ERROR; // entry 그대로 반환하면서 함수 종료
     }
 
+  // file_Tempcache에 caching되어 있는 entry가 없다면
   /* not from cache, get a new entry */
-  error_code = file_tempcache_alloc_entry (entry);
-  if (error_code != NO_ERROR)
+  error_code = file_tempcache_alloc_entry (entry); // 여기까지 왔다는건 file_Tempcache에 caching된게 없다는 뜻임. file_Tempcache에.free_entries에 entry가 남아 있다면 그걸 사용하고 없다면 malloc만 해서 entry 반환
+  if (error_code != NO_ERROR)                      // malloc만 해서 반환하기 때문에 file_Tempcache에 등록하는건 상단 caller 책임임
     {
       ASSERT_ERROR ();
       file_tempcache_unlock ();
@@ -9474,7 +9477,7 @@ file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FI
   assert (*entry != NULL);
   (*entry)->next = NULL;
   (*entry)->ftype = ftype;
-  VFID_SET_NULL (&(*entry)->vfid);
+  VFID_SET_NULL (&(*entry)->vfid); // 여기까지 왔다는건 free_entry or malloc 엔트리를 사용하는 것이기 때문에 NULL로 표시
 
   file_tempcache_unlock ();
 
@@ -9493,7 +9496,7 @@ file_tempcache_get (THREAD_ENTRY * thread_p, FILE_TYPE ftype, bool numerable, FI
  */
 static bool
 file_tempcache_check_duplicate (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry, bool is_numerable)
-{
+{ // 이 함수는 temp_file을 reset하고 다시 cache에 등록할 때 호출되는데, 등록하려는 entry->vfid가 cache에 이미 등록되어 있지 않은지 체크한다.
   FILE_TEMPCACHE_ENTRY *p;
 
   assert (entry != NULL);
@@ -9534,15 +9537,15 @@ file_tempcache_check_duplicate (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * 
  */
 STATIC_INLINE bool
 file_tempcache_put (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry)
-{
-  FILE_HEADER fhead;
+{ // file_Tempcache 구조체에 cache 자리가 남았으면 entry를 삽입. 자리가 부족하면 false 반환
+  FILE_HEADER fhead; // [참고] 자리가 부족하여 false를 반환하면 caller에서 file_destroy 수행함
 
   assert (entry != NULL);
   assert (!VFID_ISNULL (&entry->vfid));
   assert (entry->next == NULL);
 
   fhead.n_page_user = -1;
-  if (file_header_copy (thread_p, &entry->vfid, &fhead) != NO_ERROR
+  if (file_header_copy (thread_p, &entry->vfid, &fhead) != NO_ERROR // entry의 vfid의 file_header를 fhead 주소에 복사
       || fhead.n_page_user > prm_get_integer_value (PRM_ID_MAX_PAGES_IN_TEMP_FILE_CACHE))
     {
       /* file not valid for cache */
@@ -9555,16 +9558,16 @@ file_tempcache_put (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry)
   entry->ftype = fhead.type;
 
   /* lock temporary cache */
-  file_tempcache_lock ();
+  file_tempcache_lock (); // file_Tempcache 전역변수 mutex lock
 
-  if (file_Tempcache.ncached_not_numerable + file_Tempcache.ncached_numerable < file_Tempcache.ncached_max)
+  if (file_Tempcache.ncached_not_numerable + file_Tempcache.ncached_numerable < file_Tempcache.ncached_max) // file_Tempcache에 아직 caching할 공간이 남았다면
     {
       /* cache not full */
       assert ((file_Tempcache.cached_not_numerable == NULL) == (file_Tempcache.ncached_not_numerable == 0));
       assert ((file_Tempcache.cached_numerable == NULL) == (file_Tempcache.ncached_numerable == 0));
 
       /* reset file */
-      if (file_temp_reset_user_pages (thread_p, &entry->vfid) != NO_ERROR)
+      if (file_temp_reset_user_pages (thread_p, &entry->vfid) != NO_ERROR) // temp 파일들 초기화(ftab이 담긴 섹터는 제외)
 	{
 	  /* failed to reset file, we cannot cache it */
 	  ASSERT_ERROR ();
@@ -9576,16 +9579,16 @@ file_tempcache_put (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry)
 	  return false;
 	}
 
-      assert (file_tempcache_check_duplicate (thread_p, entry, FILE_IS_NUMERABLE (&fhead)) == false);
+      assert (file_tempcache_check_duplicate (thread_p, entry, FILE_IS_NUMERABLE (&fhead)) == false); // caching하려는 entry->vfid가 이미 caching되어 있지 않은지 확인
 
       /* add numerable temporary file to cached numerable file list, regular file to not numerable list */
-      if (FILE_IS_NUMERABLE (&fhead))
+      if (FILE_IS_NUMERABLE (&fhead)) // cached_numerable entry list에 삽입
 	{
 	  entry->next = file_Tempcache.cached_numerable;
 	  file_Tempcache.cached_numerable = entry;
 	  file_Tempcache.ncached_numerable++;
 	}
-      else
+      else // cached_not_numerable entry list에 삽입
 	{
 	  entry->next = file_Tempcache.cached_not_numerable;
 	  file_Tempcache.cached_not_numerable = entry;
@@ -9622,7 +9625,7 @@ file_tempcache_put (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry)
  */
 STATIC_INLINE int
 file_get_tempcache_entry_index (THREAD_ENTRY * thread_p)
-{
+{ // thread_p의 tran_index획득. 이게 왜 file_manager에 구현되어 있는지 모르겠음
 #if defined (SERVER_MODE)
   return logtb_get_current_tran_index ();
 #else
@@ -9639,13 +9642,13 @@ file_get_tempcache_entry_index (THREAD_ENTRY * thread_p)
 void
 file_tempcache_drop_tran_temp_files (THREAD_ENTRY * thread_p)
 {
-  int tran_index = file_get_tempcache_entry_index (thread_p);
-  file_tempcache_lock_tran_entry (&file_Tempcache.tran_files[tran_index]);
-  if (file_Tempcache.tran_files[tran_index].head != NULL)
+  int tran_index = file_get_tempcache_entry_index (thread_p); // thread_p의 tran_index획득
+  file_tempcache_lock_tran_entry (&file_Tempcache.tran_files[tran_index]); // tran_index의 temp_file entry mutex lock
+  if (file_Tempcache.tran_files[tran_index].head != NULL) // 이 tran_index에서 tempfile을 사용하기 위해 entry에 등록했다면
     {
-      file_tempcache_cache_or_drop_entries (thread_p, &file_Tempcache.tran_files[tran_index].head);
+      file_tempcache_cache_or_drop_entries (thread_p, &file_Tempcache.tran_files[tran_index].head); // 등록된 tempfile 모두 삭제
     }
-  file_tempcache_unlock_tran_entry (&file_Tempcache.tran_files[tran_index]);
+  file_tempcache_unlock_tran_entry (&file_Tempcache.tran_files[tran_index]); // tran_index의 temp_file entry mutex 해제
 }
 
 /*
@@ -9662,23 +9665,23 @@ file_tempcache_cache_or_drop_entries (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_EN
   FILE_TEMPCACHE_ENTRY *next = NULL;
   int num = 0;
 
-  for (temp_file = *entries; temp_file != NULL; temp_file = next)
+  for (temp_file = *entries; temp_file != NULL; temp_file = next) // tempfile entry에 등록된 모든 entry를 순회
     {
       next = temp_file->next;
       temp_file->next = NULL;
 
-      if (!file_tempcache_put (thread_p, temp_file))
+      if (!file_tempcache_put (thread_p, temp_file)) // 전역 file_Tempcache에 temp_file cache 시도
 	{
 	  /* was not cached. destroy the file */
 	  file_log ("file_tempcache_cache_or_drop_entries",
 		    "drop entry " FILE_TEMPCACHE_ENTRY_MSG, FILE_TEMPCACHE_ENTRY_AS_ARGS (temp_file));
-	  if (file_destroy (thread_p, &temp_file->vfid, true) != NO_ERROR)
+	  if (file_destroy (thread_p, &temp_file->vfid, true) != NO_ERROR) // cache 자리가 부족하면 destroy
 	    {
 	      /* file is leaked */
 	      assert_release (false);
 	      /* ignore error and continue free as many files as possible */
 	    }
-	  file_tempcache_retire_entry (temp_file);
+	  file_tempcache_retire_entry (temp_file); // free_entries에 자리 있으면 temp_file 삽입. 없으면 free()
 	}
       num++;
     }
@@ -9695,15 +9698,15 @@ file_tempcache_cache_or_drop_entries (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_EN
  */
 STATIC_INLINE FILE_TEMPCACHE_ENTRY *
 file_tempcache_pop_tran_file (THREAD_ENTRY * thread_p, const VFID * vfid)
-{
+{ // 전달된 vfid에 해당하는 entry를 file_Tempcache.tran_files list에서 삭제
   int tran_index = file_get_tempcache_entry_index (thread_p);
-  FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index];
+  FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index]; // 현재 tran_index의 tran_entry 획득
   FILE_TEMPCACHE_ENTRY *entry = NULL, *prev_entry = NULL;
 
-  file_tempcache_lock_tran_entry (tran_entry);
+  file_tempcache_lock_tran_entry (tran_entry); // tran_entry lock
   for (entry = tran_entry->head; entry != NULL; entry = entry->next)
     {
-      if (VFID_EQ (&entry->vfid, vfid))
+      if (VFID_EQ (&entry->vfid, vfid)) // 전달된 vfid와 일치하는 엔트라면 해당 엔트리 삭제
 	{
 	  /* remove entry from transaction list */
 	  if (prev_entry != NULL)
@@ -9738,7 +9741,7 @@ file_tempcache_pop_tran_file (THREAD_ENTRY * thread_p, const VFID * vfid)
  */
 STATIC_INLINE void
 file_tempcache_push_tran_file (THREAD_ENTRY * thread_p, FILE_TEMPCACHE_ENTRY * entry)
-{
+{ // tran_index의 tran_files 리스트에 엔트리 붙임
   int tran_index = file_get_tempcache_entry_index (thread_p);
   FILE_TEMPCACHE_TRAN_ENTRY *tran_entry = &file_Tempcache.tran_files[tran_index];
 
@@ -9819,18 +9822,18 @@ file_tempcache_dump (FILE * fp)
 
 STATIC_INLINE void
 file_tempcache_lock_tran_entry (FILE_TEMPCACHE_TRAN_ENTRY * tran_entry)
-{
-  assert (tran_entry->owner_mutex != thread_get_current_entry_index ());
-  pthread_mutex_lock (&tran_entry->mutex);
+{ // tempfile_cache의 특정 entry의 mutex lock 수행
+  assert (tran_entry->owner_mutex != thread_get_current_entry_index ()); // 특정 엔트리의 mutex는 누군가가 잡고 있거나 잡고 있지 않기 때문에 현재 스레드의 index와는 다를 수밖에 없다.
+  pthread_mutex_lock (&tran_entry->mutex); // 해당 tran_entry에 mutex lock
   assert (tran_entry->owner_mutex == -1);
 #if !defined (NDEBUG)
-  tran_entry->owner_mutex = thread_get_current_entry_index ();
+  tran_entry->owner_mutex = thread_get_current_entry_index (); // 해당 tran_entry의 muxt 소유자에 내 트랜잭션 인덱스 표기
 #endif /* !NDEBUG */
 }
 
 STATIC_INLINE void
 file_tempcache_unlock_tran_entry (FILE_TEMPCACHE_TRAN_ENTRY * tran_entry)
-{
+{ // tempfile_entry의 mutex unlock 수행
   assert (tran_entry->owner_mutex == thread_get_current_entry_index ());
 #if !defined (NDEBUG)
   tran_entry->owner_mutex = -1;
@@ -9930,12 +9933,12 @@ file_tracker_load (THREAD_ENTRY * thread_p, const VFID * vfid)
  */
 static int
 file_tracker_init_page (THREAD_ENTRY * thread_p, PAGE_PTR page, void *args)
-{
+{ // file_tracker를 item으로 가지는 extdata 페이지로 초기화
   FILE_EXTENSIBLE_DATA *extdata = (FILE_EXTENSIBLE_DATA *) page;
 
-  pgbuf_set_page_ptype (thread_p, page, PAGE_FTAB);
-  file_extdata_init (sizeof (FILE_TRACK_ITEM), DB_PAGESIZE, extdata);
-  log_append_undoredo_data2 (thread_p, RVPGBUF_NEW_PAGE, NULL, page, (PGLENGTH) PAGE_FTAB, 0, sizeof (*extdata), NULL,
+  pgbuf_set_page_ptype (thread_p, page, PAGE_FTAB); // FTAB 페이지로 설정
+  file_extdata_init (sizeof (FILE_TRACK_ITEM), DB_PAGESIZE, extdata); // item 사용 가능한 페이지로 init
+  log_append_undoredo_data2 (thread_p, RVPGBUF_NEW_PAGE, NULL, page, (PGLENGTH) PAGE_FTAB, 0, sizeof (*extdata), NULL, // undo_logging
 			     page);
   pgbuf_set_dirty (thread_p, page, DONT_FREE);
 
@@ -10022,20 +10025,20 @@ file_tracker_register_internal (THREAD_ENTRY * thread_p, PAGE_PTR page_track_hea
 
   /* find a space to add new item */
   extdata = (FILE_EXTENSIBLE_DATA *) page_track_head; // file_Tracker_vpid의 페이지 포인터를 (FILE_EXTENSIBLE_DATA) 타입으로 변환. [질문] 페이지의 시작점을 ext_data로 변환해도 정상적으로 적용이 되나? 왜지?
-  error_code = file_extdata_find_not_full (thread_p, &extdata, &page_track_other, &found); // extdata 순회해서 빈 vsid 획득(모두 가득 찼다면 획득하지 못했을 수 있음)
+  error_code = file_extdata_find_not_full (thread_p, &extdata, &page_track_other, &found); // item을 삽입할 수 있는(item이 가득 차지 않은) extdata를 얻어옴.(extdata가 가득찼다면 vpid_next의 extdata 확인하는 방식)
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
       goto exit;
     }
-  page_extdata = page_track_other != NULL ? page_track_other : page_track_head;
+  page_extdata = page_track_other != NULL ? page_track_other : page_track_head; // extdata의 첫 페이지를 사용하면 page_track_head 활용
 
-  if (!found) // 위에서 찾지 못했다면
+  if (!found) // 위에서 찾지 못했다면(모든 extdata를 담는 페이지들이 가득 차서 item을 삽입할 수 없는 상황)
     {
       /* allocate a new page */
       VPID vpid_new_page;
 
-      error_code = file_alloc (thread_p, &file_Tracker_vfid, file_tracker_init_page, NULL, &vpid_new_page, NULL);
+      error_code = file_alloc (thread_p, &file_Tracker_vfid, file_tracker_init_page, NULL, &vpid_new_page, NULL); // file_Tracker_vfid의 ftab에서 사용 가능한 페이지를 vpid_new_page에 반환
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -10043,7 +10046,7 @@ file_tracker_register_internal (THREAD_ENTRY * thread_p, PAGE_PTR page_track_hea
 	}
 
       /* add link to new page */
-      file_log_extdata_set_next (thread_p, extdata, page_extdata, &vpid_new_page);
+      file_log_extdata_set_next (thread_p, extdata, page_extdata, &vpid_new_page); // logging한다고 간단하게 보자
       extdata->vpid_next = vpid_new_page;
       pgbuf_set_dirty (thread_p, page_extdata, DONT_FREE);
 
@@ -10063,7 +10066,7 @@ file_tracker_register_internal (THREAD_ENTRY * thread_p, PAGE_PTR page_track_hea
       assert (pgbuf_get_page_ptype (thread_p, page_track_other) == PAGE_FTAB);
 
       page_extdata = page_track_other;
-      extdata = (FILE_EXTENSIBLE_DATA *) page_extdata;
+      extdata = (FILE_EXTENSIBLE_DATA *) page_extdata; // 위에서 alloc한 페이지를 extdata 담는 페이지로 사용
     }
 
   assert (page_extdata != NULL);
@@ -10083,7 +10086,7 @@ file_tracker_register_internal (THREAD_ENTRY * thread_p, PAGE_PTR page_track_hea
     }
 
   save_lsa = *pgbuf_get_lsa (page_extdata);
-  file_extdata_insert_at (extdata, pos, 1, item); // file_Tracker_vpid의 extdata에 item 삽입
+  file_extdata_insert_at (extdata, pos, 1, item); // file_Tracker_vpid의 extdata에 생성한 file에 대한 item 삽입
   file_log_extdata_add (thread_p, extdata, page_extdata, pos, 1, item); // file_Tracker_vpid page dirty 표시
   pgbuf_set_dirty (thread_p, page_extdata, DONT_FREE);
 
@@ -11729,13 +11732,13 @@ file_descriptor_get (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_DESCRIPTOR
  */
 int
 file_descriptor_update (THREAD_ENTRY * thread_p, const VFID * vfid, void *des_new)
-{
+{ // 전달된 vfid의 fhead->des를 des_new로 memcpy -> page dirty 표시
   VPID vpid_fhead;
   PAGE_PTR page_fhead = NULL;
   FILE_HEADER *fhead = NULL;
   int error_code = NO_ERROR;
 
-  FILE_GET_HEADER_VPID (vfid, &vpid_fhead);
+  FILE_GET_HEADER_VPID (vfid, &vpid_fhead); // 전달된 vfid를 vpid_fhead에 할당
   page_fhead = pgbuf_fix (thread_p, &vpid_fhead, OLD_PAGE, PGBUF_LATCH_WRITE, PGBUF_UNCONDITIONAL_LATCH);
   if (page_fhead == NULL)
     {
@@ -11743,15 +11746,15 @@ file_descriptor_update (THREAD_ENTRY * thread_p, const VFID * vfid, void *des_ne
       return error_code;
     }
   fhead = (FILE_HEADER *) page_fhead;
-  file_header_sanity_check (thread_p, fhead);
+  file_header_sanity_check (thread_p, fhead); // fhead-sector_ftab 일치하는지 확인
 
-  log_append_undoredo_data2 (thread_p, RVFL_FILEDESC_UPD, NULL, page_fhead,
+  log_append_undoredo_data2 (thread_p, RVFL_FILEDESC_UPD, NULL, page_fhead, // undo_logging
 			     (PGLENGTH) ((char *) &fhead->descriptor - page_fhead), sizeof (fhead->descriptor),
 			     sizeof (fhead->descriptor), &fhead->descriptor, des_new);
 
-  memcpy (&fhead->descriptor, des_new, sizeof (fhead->descriptor));
+  memcpy (&fhead->descriptor, des_new, sizeof (fhead->descriptor)); // fix한 vfid 페이지를 가져와서 fhead의 des값을 des_new 값으로 덮어씌움
 
-  pgbuf_set_dirty (thread_p, page_fhead, FREE);
+  pgbuf_set_dirty (thread_p, page_fhead, FREE); // page dirty 표시
   return NO_ERROR;
 }
 
