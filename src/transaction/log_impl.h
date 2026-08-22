@@ -821,6 +821,7 @@ typedef struct cdc_temp_logbuf
 typedef struct cdc_producer
 {
   LOG_LSA next_extraction_lsa;
+  bool is_reset_process_lsa;
 
   /* configuration */
   int all_in_cond;
@@ -880,8 +881,6 @@ typedef struct cdc_global
   LOG_LSA first_loginfo_queue_lsa;
   LOG_LSA last_loginfo_queue_lsa;
 
-  bool is_queue_reinitialized;
-
 } CDC_GLOBAL;
 
 /* will be moved to new file for CDC */
@@ -935,6 +934,8 @@ extern LOG_GLOBAL log_Gl;
 
 extern LOG_LOGGING_STAT log_Stat;
 
+extern bool logtb_Reuse_boot_managers;
+
 /* Name of the database and logs */
 extern char log_Path[];
 extern char log_Archive_path[];
@@ -954,7 +955,7 @@ extern bool cdc_Logging;
 
 #if defined (SERVER_MODE)
 // *INDENT-OFF*
-extern cubthread::entry_workpool *g_backup_read_worker_pool;
+extern cubthread::worker_pool_type *g_backup_read_worker_pool;
 // *INDENT-ON*
 #endif
 
@@ -1175,6 +1176,7 @@ extern void logtb_get_new_subtransaction_mvccid (THREAD_ENTRY * thread_p, MVCC_I
 
 extern MVCCID logtb_find_current_mvccid (THREAD_ENTRY * thread_p);
 extern MVCCID logtb_get_current_mvccid (THREAD_ENTRY * thread_p);
+extern int logtb_ensure_mvccid_self_lock (THREAD_ENTRY * thread_p);
 extern int logtb_invalidate_snapshot_data (THREAD_ENTRY * thread_p);
 extern int xlogtb_get_mvcc_snapshot (THREAD_ENTRY * thread_p);
 

@@ -32,6 +32,10 @@
 #include <signal.h>
 #include <errno.h>
 #include <assert.h>
+#if !defined(WINDOWS)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include "utility.h"
 #include "error_manager.h"
@@ -60,7 +64,7 @@
 #include "log_volids.hpp"
 #include "tde.h"
 #include "flashback_cl.h"
-#include "connection_support.h"
+#include "connection_support.hpp"
 #include "memory_monitor_cl.hpp"
 #if !defined(WINDOWS)
 #include "heartbeat.h"
@@ -103,6 +107,19 @@ typedef enum
   SORT_COLUMN_TYPE_FLOAT,
   SORT_COLUMN_TYPE_STR,
 } SORT_COLUMN_TYPE;
+
+#if defined(CS_MODE) && !defined(WINDOWS)
+static volatile sig_atomic_t sigusr1_running = 0;
+static volatile sig_atomic_t sigusr1_pipe_write_fd = -1;
+static bool sigusr1_started = false;
+static bool sigusr1_old_action_saved = false;
+static pthread_t sigusr1_tid;
+static struct sigaction sigusr1_old_action;
+static int sigusr1_pipe_fds[2] = { -1, -1 };
+
+static int sigusr1_saved_stdout_fd = -1;
+static FILE *sigusr1_dump_outfp = NULL;
+#endif /* CS_MODE && !WINDOWS */
 
 static int tranlist_Sort_column = 0;
 static bool tranlist_Sort_desc = false;
@@ -367,6 +384,7 @@ addvoldb (UTIL_FUNCTION_ARG * arg)
   UINT64 volext_size;
   UINT64 volext_max_writesize;
   const char *volext_string_purpose = NULL;
+  const char *volext_string_voltype = NULL;
   const char *volext_npages_string = NULL;
   const char *volext_size_str = NULL;
   const char *volext_max_writesize_in_sec_str = NULL;
@@ -432,12 +450,9 @@ addvoldb (UTIL_FUNCTION_ARG * arg)
   volext_string_purpose = utility_get_option_string_value (arg_map, ADDVOL_PURPOSE_S, 0);
   if (volext_string_purpose == NULL)
     {
-      volext_string_purpose = "generic";
+      ext_info.purpose = DB_PERMANENT_DATA_PURPOSE;
     }
-
-  ext_info.purpose = DB_PERMANENT_DATA_PURPOSE;
-
-  if (strcasecmp (volext_string_purpose, "data") == 0)
+  else if (strcasecmp (volext_string_purpose, "data") == 0)
     {
       ext_info.purpose = DB_PERMANENT_DATA_PURPOSE;
     }
@@ -466,7 +481,50 @@ addvoldb (UTIL_FUNCTION_ARG * arg)
     {
       ext_info.max_writesize_in_sec = 0;
       fprintf (stderr,
-	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB, ADDVOLDB_INVALID_MAX_WRITESIZE_IN_SEC));
+	       "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB,
+				     ADDVOLDB_INVALID_MAX_WRITESIZE_IN_SEC));
+    }
+
+  volext_string_voltype = utility_get_option_string_value (arg_map, ADDVOL_VOLTYPE_S, 0);
+  if (volext_string_voltype == NULL || strcasecmp (volext_string_voltype, "perm") == 0)
+    {
+      ext_info.voltype = DB_PERMANENT_VOLTYPE;
+    }
+  else if (strcasecmp (volext_string_voltype, "temp") == 0)
+    {
+      if (sa_mode)
+	{
+	  PRINT_AND_LOG_ERR_MSG (msgcat_message
+				 (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB, ADDVOLDB_VOLTYPE_NOT_SUPPORT_SAMODE));
+	  goto error_exit;
+	}
+
+      if (volext_string_purpose != NULL && ext_info.purpose != DB_TEMPORARY_DATA_PURPOSE)
+	{
+	  PRINT_AND_LOG_ERR_MSG (msgcat_message
+				 (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB,
+				  ADDVOLDB_VOLTYPE_MUSTBE_TEMP_PURPOSE));
+	  goto error_exit;
+	}
+      else
+	{
+	  ext_info.purpose = DB_TEMPORARY_DATA_PURPOSE;
+	}
+
+      if (ext_info.name != NULL || ext_info.path != NULL)
+	{
+	  PRINT_AND_LOG_ERR_MSG (msgcat_message
+				 (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB, ADDVOLDB_VOLTYPE_NOT_USED_PATH_NAME));
+	  goto error_exit;
+	}
+
+      ext_info.voltype = DB_TEMPORARY_VOLTYPE;
+    }
+  else
+    {
+      PRINT_AND_LOG_ERR_MSG (msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_ADDVOLDB, ADDVOLDB_MSG_BAD_VOLTYPE),
+			     volext_string_voltype);
+      goto error_exit;
     }
 
   /* extra validation */
@@ -1012,11 +1070,13 @@ spacedb (UTIL_FUNCTION_ARG * arg)
   /* print header */
   if (size_unit_type == SPACEDB_SIZE_UNIT_PAGE)
     {
-      fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_ALL_HEADER_PAGES));
+      fprintf (outfp, "%s",
+	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_ALL_HEADER_PAGES));
     }
   else
     {
-      fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_ALL_HEADER_SIZE));
+      fprintf (outfp, "%s",
+	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_ALL_HEADER_SIZE));
     }
   /* print values. the format is:
    * type, purpose, used pages/size, free pages/size, total pages/size */
@@ -1036,16 +1096,17 @@ spacedb (UTIL_FUNCTION_ARG * arg)
       MSGCAT_SPACEDB_MSG msg_vols_format;
 
       /* print title */
-      fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_TITLE));
+      fprintf (outfp, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_TITLE));
       /* print header */
       if (size_unit_type == SPACEDB_SIZE_UNIT_PAGE)
 	{
 	  fprintf (outfp,
-		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_HEADER_PAGES));
+		   "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_HEADER_PAGES));
 	}
       else
 	{
-	  fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_HEADER_SIZE));
+	  fprintf (outfp, "%s",
+		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_VOLS_HEADER_SIZE));
 	}
 
       /* print each volume */
@@ -1081,17 +1142,18 @@ spacedb (UTIL_FUNCTION_ARG * arg)
       /* print detailed files information */
 
       /* print title */
-      fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_FILES_TITLE));
+      fprintf (outfp, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_FILES_TITLE));
       /* print header */
       if (size_unit_type == SPACEDB_SIZE_UNIT_PAGE)
 	{
 	  fprintf (outfp,
-		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_FILES_HEADER_PAGES));
+		   "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB,
+					 SPACEDB_MSG_FILES_HEADER_PAGES));
 	}
       else
 	{
 	  fprintf (outfp,
-		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_FILES_HEADER_SIZE));
+		   "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_SPACEDB, SPACEDB_MSG_FILES_HEADER_SIZE));
 	}
 
       /* the format is:
@@ -1410,8 +1472,8 @@ dump_trantb (TRANS_INFO * info, TRANDUMP_LEVEL dump_level, bool full_sqltext)
 	      if (num_valid == 0)
 		{
 		  /* Dump table header */
-		  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
-		  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+		  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
+		  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
 		}
 
 	      num_valid++;
@@ -1422,12 +1484,12 @@ dump_trantb (TRANS_INFO * info, TRANDUMP_LEVEL dump_level, bool full_sqltext)
 
   if (num_valid > 0)
     {
-      fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+      fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
     }
   else
     {
       fprintf (stdout,
-	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, TRANLIST_MSG_NONE_TABLE_ENTRIES));
+	       "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, TRANLIST_MSG_NONE_TABLE_ENTRIES));
     }
 
   if (info != NULL && (dump_level == TRANDUMP_QUERY_INFO || dump_level == TRANDUMP_FULL_INFO))
@@ -1541,10 +1603,11 @@ kill_transactions (TRANS_INFO * info, int *tran_index_list, int list_size, const
 	  /*
 	   * display the transactin identifiers that we are about to kill
 	   */
-	  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN, KILLTRAN_MSG_READY_TO_KILL));
+	  fprintf (stdout, "%s",
+		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN, KILLTRAN_MSG_READY_TO_KILL));
 
-	  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
-	  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+	  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
+	  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
 
 	  for (i = 0; i < info->num_trans; i++)
 	    {
@@ -1554,9 +1617,9 @@ kill_transactions (TRANS_INFO * info, int *tran_index_list, int list_size, const
 		  print_tran_entry (&info->tran[i], dump_level, false);
 		}
 	    }
-	  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+	  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
 
-	  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN, KILLTRAN_MSG_VERIFY));
+	  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN, KILLTRAN_MSG_VERIFY));
 	  fflush (stdout);
 
 	  ch = getc (stdin);
@@ -1589,10 +1652,12 @@ kill_transactions (TRANS_INFO * info, int *tran_index_list, int list_size, const
 		       */
 		      if (nfailures == 0)
 			{
-			  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN,
-							   KILLTRAN_MSG_KILL_FAILED));
-			  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
-			  fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+			  fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_KILLTRAN,
+								 KILLTRAN_MSG_KILL_FAILED));
+			  fprintf (stdout, "%s",
+				   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, header));
+			  fprintf (stdout, "%s",
+				   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
 			}
 
 		      print_tran_entry (&info->tran[i], dump_level, false);
@@ -1613,7 +1678,7 @@ kill_transactions (TRANS_INFO * info, int *tran_index_list, int list_size, const
 
 	  if (nfailures > 0)
 	    {
-	      fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
+	      fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_TRANLIST, underscore));
 	    }
 	}
     }
@@ -2279,7 +2344,8 @@ paramdump (UTIL_FUNCTION_ARG * arg)
 
   if (ha_only_flag && exclude_ha_flag)
     {
-      fprintf (stderr, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_BAD_OPTION));
+      fprintf (stderr, "%s",
+	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_BAD_OPTION));
       goto print_dumpparam_usage;
     }
 
@@ -2345,7 +2411,8 @@ paramdump (UTIL_FUNCTION_ARG * arg)
     {
 #if defined(SA_MODE)
       fprintf (outfp,
-	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_STANDALONE_PARAMETER));
+	       "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP,
+				     PARAMDUMP_MSG_STANDALONE_PARAMETER));
       sysprm_dump_parameters (outfp, ' ', PRM_FOR_CLIENT | PRM_FOR_SERVER, PRM_OR_CONDITION, out_flags,
 			      PRM_OR_CONDITION, true);
 #else
@@ -2353,7 +2420,8 @@ paramdump (UTIL_FUNCTION_ARG * arg)
 	{
 	  /* dump client's parameters */
 	  fprintf (outfp,
-		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_CLIENT_PARAMETER));
+		   "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP,
+					 PARAMDUMP_MSG_CLIENT_PARAMETER));
 	  sysprm_dump_parameters (outfp, 'C', PRM_FOR_CLIENT | PRM_FOR_SERVER, PRM_OR_CONDITION, out_flags,
 				  PRM_OR_CONDITION, true);
 	  fprintf (outfp, "\n");
@@ -2370,7 +2438,8 @@ paramdump (UTIL_FUNCTION_ARG * arg)
     {
 
       /* dump client's parameters */
-      fprintf (outfp, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_CLIENT_PARAMETER));
+      fprintf (outfp, "%s",
+	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_PARAMDUMP, PARAMDUMP_MSG_CLIENT_PARAMETER));
       sysprm_dump_parameters (outfp, 'C', PRM_FOR_CLIENT | added_in_flags, PRM_AND_CONDITION, out_flags,
 			      PRM_OR_CONDITION, false);
       fprintf (outfp, "\n");
@@ -2727,6 +2796,315 @@ error_exit:
 #endif /* !WINDOWS */
 }
 
+#if defined (CS_MODE) && !defined(WINDOWS)
+/*
+ * sigusr1_signal_handler () - wake the monitor thread on SIGUSR1
+ *   return: none
+ *   sig_no(in): signal number
+ *
+ * The actual dump uses fprintf-heavy routines, so keep the signal handler
+ * async-signal-safe and delegate work to the monitor thread through a pipe.
+ */
+static void
+sigusr1_signal_handler (int sig_no)
+{
+  int saved_errno = errno;
+  int fd = (int) sigusr1_pipe_write_fd;
+
+  if (sig_no == SIGUSR1 && fd != -1)
+    {
+      char wakeup = 1;
+
+      (void) write (fd, &wakeup, sizeof (wakeup));
+    }
+
+  errno = saved_errno;
+}
+
+/*
+ * sigusr1_dump () - dump information for copylogdb/applylogdb
+ *   return: none
+ *   util_index(in): utility index
+ *   out(in): dump output stream
+ */
+static void
+sigusr1_dump (int util_index, FILE * out)
+{
+  switch (util_index)
+    {
+    case COPYLOGDB:
+      logwr_dump_logwr_gl (out);
+      break;
+    case APPLYLOGDB:
+      la_dump_la_info (out);
+      break;
+    default:
+      break;
+    }
+}
+
+/*
+ * Thread function that waits for SIGUSR1 requests and dumps information
+ * depending on which utility (COPYLOGDB or APPLYLOGDB) is running.
+ */
+static void *
+sigusr1_monitor_thread (void *arg)
+{
+  int util_index = (int) (intptr_t) arg;
+  FILE *out = sigusr1_dump_outfp != NULL ? sigusr1_dump_outfp : stdout;
+
+  while (sigusr1_running)
+    {
+      char buffer[64];
+      ssize_t nread = read (sigusr1_pipe_fds[0], buffer, sizeof (buffer));
+
+      if (nread > 0)
+	{
+	  if (!sigusr1_running)
+	    {
+	      break;
+	    }
+
+	  sigusr1_dump (util_index, out);
+	  fflush (out);
+	}
+      else if (nread == -1)
+	{
+	  if (errno == EINTR)
+	    {
+	      continue;
+	    }
+
+	  break;
+	}
+    }
+
+  return NULL;
+}
+
+/*
+ * sigusr1_save_stdout () - keep the original stdout as the diagnostic dump target
+ *   return: none
+ *
+ * Note: copylogdb/applylogdb redirect stdout to /dev/null in NDEBUG builds.
+ * Save the descriptor before that redirection so SIGUSR1 diagnostics still go
+ * to the caller-visible stdout requested by CBRD-26062.
+ */
+static void
+sigusr1_save_stdout (void)
+{
+  if (sigusr1_saved_stdout_fd == -1)
+    {
+      sigusr1_saved_stdout_fd = dup (STDOUT_FILENO);
+    }
+}
+
+/*
+ * sigusr1_close_dump_output () - close diagnostic output descriptors
+ *   return: none
+ */
+static void
+sigusr1_close_dump_output (void)
+{
+  if (sigusr1_dump_outfp != NULL)
+    {
+      fclose (sigusr1_dump_outfp);
+      sigusr1_dump_outfp = NULL;
+    }
+
+  if (sigusr1_saved_stdout_fd != -1)
+    {
+      close (sigusr1_saved_stdout_fd);
+      sigusr1_saved_stdout_fd = -1;
+    }
+}
+
+/*
+ * sigusr1_close_pipe () - close the monitor wakeup pipe
+ *   return: none
+ */
+static void
+sigusr1_close_pipe (void)
+{
+  sigusr1_pipe_write_fd = -1;
+
+  if (sigusr1_pipe_fds[0] != -1)
+    {
+      close (sigusr1_pipe_fds[0]);
+      sigusr1_pipe_fds[0] = -1;
+    }
+
+  if (sigusr1_pipe_fds[1] != -1)
+    {
+      close (sigusr1_pipe_fds[1]);
+      sigusr1_pipe_fds[1] = -1;
+    }
+}
+
+/*
+ * sigusr1_create_pipe () - create the monitor wakeup pipe
+ *   return: NO_ERROR or error code
+ */
+static int
+sigusr1_create_pipe (void)
+{
+  int flags;
+
+  if (pipe (sigusr1_pipe_fds) != 0)
+    {
+      er_log_debug (ARG_FILE_LINE, "failed to create SIGUSR1 monitor pipe: %d\n", errno);
+      return ER_FAILED;
+    }
+
+  flags = fcntl (sigusr1_pipe_fds[1], F_GETFL, 0);
+  if (flags == -1 || fcntl (sigusr1_pipe_fds[1], F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+      er_log_debug (ARG_FILE_LINE, "failed to set SIGUSR1 monitor pipe nonblocking: %d\n", errno);
+      sigusr1_close_pipe ();
+      return ER_FAILED;
+    }
+
+  sigusr1_pipe_write_fd = sigusr1_pipe_fds[1];
+  return NO_ERROR;
+}
+
+/*
+ * sigusr1_install_signal_handler () - install the SIGUSR1 wakeup handler
+ *   return: NO_ERROR or error code
+ */
+static int
+sigusr1_install_signal_handler (void)
+{
+  struct sigaction action;
+
+  sigemptyset (&action.sa_mask);
+  action.sa_handler = sigusr1_signal_handler;
+  action.sa_flags = SA_RESTART;
+
+  if (sigaction (SIGUSR1, &action, &sigusr1_old_action) != 0)
+    {
+      er_log_debug (ARG_FILE_LINE, "failed to install SIGUSR1 handler: %d\n", errno);
+      return ER_FAILED;
+    }
+
+  sigusr1_old_action_saved = true;
+  return NO_ERROR;
+}
+
+/*
+ * sigusr1_restore_signal_handler () - restore previous SIGUSR1 disposition
+ *   return: none
+ */
+static void
+sigusr1_restore_signal_handler (void)
+{
+  if (sigusr1_old_action_saved)
+    {
+      (void) sigaction (SIGUSR1, &sigusr1_old_action, NULL);
+      sigusr1_old_action_saved = false;
+    }
+}
+
+/*
+ * Start the SIGUSR1 monitor thread.
+ * Installs an async-signal-safe handler that wakes a joinable monitor
+ * thread to print diagnostics.
+ */
+static void
+start_sigusr1_monitor (int util_index)
+{
+  int error;
+
+  if (sigusr1_started)
+    {
+      return;
+    }
+
+  sigusr1_save_stdout ();
+  if (sigusr1_saved_stdout_fd != -1)
+    {
+      int dump_fd = dup (sigusr1_saved_stdout_fd);
+      if (dump_fd != -1)
+	{
+	  sigusr1_dump_outfp = fdopen (dump_fd, "a");
+	  if (sigusr1_dump_outfp == NULL)
+	    {
+	      close (dump_fd);
+	    }
+	  else
+	    {
+	      setvbuf (sigusr1_dump_outfp, NULL, _IOLBF, 0);
+	    }
+	}
+    }
+
+  if (sigusr1_create_pipe () != NO_ERROR)
+    {
+      sigusr1_close_dump_output ();
+      return;
+    }
+
+  if (sigusr1_install_signal_handler () != NO_ERROR)
+    {
+      sigusr1_close_pipe ();
+      sigusr1_close_dump_output ();
+      return;
+    }
+
+  /* Set running flag and create the monitor thread (joinable) */
+  sigusr1_running = true;
+  error = pthread_create (&sigusr1_tid, NULL, sigusr1_monitor_thread, (void *) (intptr_t) util_index);
+  if (error != 0)
+    {
+      er_log_debug (ARG_FILE_LINE, "failed to create SIGUSR1 monitor thread: %d\n", error);
+      sigusr1_running = false;
+      sigusr1_restore_signal_handler ();
+      sigusr1_close_pipe ();
+      sigusr1_close_dump_output ();
+      return;
+    }
+
+  sigusr1_started = true;
+}
+
+/*
+ * Stop the SIGUSR1 monitor thread.
+ * Clears the running flag, wakes the monitor through the pipe, and then joins
+ * the thread to clean up.
+ */
+static void
+stop_sigusr1_monitor (void)
+{
+  if (!sigusr1_started)
+    {
+      sigusr1_running = false;
+      sigusr1_restore_signal_handler ();
+      sigusr1_close_pipe ();
+      sigusr1_close_dump_output ();
+      return;
+    }
+
+  /* Clear the running flag so thread will exit on next wakeup */
+  sigusr1_running = false;
+
+  /* Wake the monitor thread from read(). */
+  if (sigusr1_pipe_fds[1] != -1)
+    {
+      char wakeup = 1;
+
+      (void) write (sigusr1_pipe_fds[1], &wakeup, sizeof (wakeup));
+    }
+
+  /* Wait for the monitor thread to terminate and reclaim resources */
+  (void) pthread_join (sigusr1_tid, NULL);
+
+  sigusr1_started = false;
+  sigusr1_restore_signal_handler ();
+  sigusr1_close_pipe ();
+  sigusr1_close_dump_output ();
+}
+#endif /* CS_MODE && !WINDOWS */
+
 /*
  * copylogdb() - copylogdb main routine
  *   return: EXIT_SUCCESS/EXIT_FAILURE
@@ -2810,6 +3188,8 @@ copylogdb (UTIL_FUNCTION_ARG * arg)
 
   start_pageid = utility_get_option_bigint_value (arg_map, COPYLOG_START_PAGEID_S);
 
+  sigusr1_save_stdout ();
+
 #if defined(NDEBUG)
   util_redirect_stdout_to_null ();
 #endif
@@ -2825,7 +3205,17 @@ copylogdb (UTIL_FUNCTION_ARG * arg)
   os_set_signal_handler (SIGBUS, crash_handler);
   os_set_signal_handler (SIGSEGV, crash_handler);
   os_set_signal_handler (SIGSYS, crash_handler);
+#endif
 
+  start_sigusr1_monitor (COPYLOGDB);
+  AU_DISABLE_PASSWORDS ();
+  db_set_client_type (DB_CLIENT_TYPE_LOG_COPIER);
+  if (db_login ("DBA", NULL) != NO_ERROR)
+    {
+      PRINT_AND_LOG_ERR_MSG ("%s\n", db_error_string (3));
+      goto error_exit;
+    }
+#if !defined(WINDOWS)
   /* save executable path */
   binary_name = basename (arg->argv0);
   (void) envvar_bindir_file (executable_path, PATH_MAX, binary_name);
@@ -2858,6 +3248,7 @@ copylogdb (UTIL_FUNCTION_ARG * arg)
 	      util_log_write_errstr ("%s\n", db_error_string (3));
 	    }
 
+	  stop_sigusr1_monitor ();
 	  return EXIT_FAILURE;
 	}
       er_set_ignore_uninit (true);
@@ -2911,6 +3302,7 @@ retry:
     }
 
   (void) db_shutdown ();
+  stop_sigusr1_monitor ();
   return EXIT_SUCCESS;
 
 print_copylog_usage:
@@ -2918,12 +3310,14 @@ print_copylog_usage:
 	   basename (arg->argv0));
   util_log_write_errid (MSGCAT_UTIL_GENERIC_INVALID_ARGUMENT);
 
+  stop_sigusr1_monitor ();
   return EXIT_FAILURE;
 
 error_exit:
 #if !defined(WINDOWS)
   if (hb_Proc_shutdown)
     {
+      stop_sigusr1_monitor ();
       return EXIT_SUCCESS;
     }
 #endif
@@ -2950,6 +3344,7 @@ error_exit:
       goto retry;
     }
 
+  stop_sigusr1_monitor ();
   return EXIT_FAILURE;
 #else /* CS_MODE */
   PRINT_AND_LOG_ERR_MSG (msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_COPYLOGDB,
@@ -3016,6 +3411,8 @@ applylogdb (UTIL_FUNCTION_ARG * arg)
       goto print_applylog_usage;
     }
 
+  sigusr1_save_stdout ();
+
 #if defined(NDEBUG)
   util_redirect_stdout_to_null ();
 #endif
@@ -3034,7 +3431,18 @@ applylogdb (UTIL_FUNCTION_ARG * arg)
   os_set_signal_handler (SIGBUS, crash_handler);
   os_set_signal_handler (SIGSEGV, crash_handler);
   os_set_signal_handler (SIGSYS, crash_handler);
+#endif
+  start_sigusr1_monitor (APPLYLOGDB);
 
+  AU_DISABLE_PASSWORDS ();
+  db_set_client_type (DB_CLIENT_TYPE_LOG_APPLIER);
+  if (db_login ("DBA", NULL) != NO_ERROR)
+    {
+      PRINT_AND_LOG_ERR_MSG ("%s\n", db_error_string (3));
+      goto error_exit;
+    }
+
+#if !defined(WINDOWS)
   /* save executable path */
   binary_name = basename (arg->argv0);
   (void) envvar_bindir_file (executable_path, PATH_MAX, binary_name);
@@ -3061,6 +3469,8 @@ applylogdb (UTIL_FUNCTION_ARG * arg)
 	    {
 	      util_log_write_errstr ("%s\n", db_error_string (3));
 	    }
+
+	  stop_sigusr1_monitor ();
 	  return EXIT_FAILURE;
 	}
       er_set_ignore_uninit (true);
@@ -3077,6 +3487,8 @@ applylogdb (UTIL_FUNCTION_ARG * arg)
 						     MSGCAT_UTIL_GENERIC_INVALID_PARAMETER),
 				     prm_get_name (PRM_ID_HA_REPLICA_TIME_BOUND),
 				     "(the correct format: YYYY-MM-DD hh:mm:ss)");
+
+	      stop_sigusr1_monitor ();
 	      return EXIT_FAILURE;
 	    }
 	}
@@ -3122,7 +3534,8 @@ retry:
 
   if (HA_DISABLED ())
     {
-      fprintf (stderr, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_APPLYLOGDB, APPLYLOGDB_MSG_NOT_HA_MODE));
+      fprintf (stderr, "%s",
+	       msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_APPLYLOGDB, APPLYLOGDB_MSG_NOT_HA_MODE));
       (void) db_shutdown ();
       goto error_exit;
     }
@@ -3136,6 +3549,7 @@ retry:
     }
 
   (void) db_shutdown ();
+  stop_sigusr1_monitor ();
   return EXIT_SUCCESS;
 
 print_applylog_usage:
@@ -3147,6 +3561,7 @@ error_exit:
 #if !defined(WINDOWS)
   if (hb_Proc_shutdown)
     {
+      stop_sigusr1_monitor ();
       return EXIT_SUCCESS;
     }
 #endif
@@ -3167,6 +3582,7 @@ error_exit:
       goto retry;
     }
 
+  stop_sigusr1_monitor ();
   return EXIT_FAILURE;
 #else /* CS_MODE */
   PRINT_AND_LOG_ERR_MSG (msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_APPLYLOGDB,
@@ -4247,6 +4663,9 @@ flashback (UTIL_FUNCTION_ARG * arg)
 
   int timeout = 0;
 
+  /* exit code returned via the error_exit cleanup path; EXIT_SUCCESS only for a clean non-interactive quit */
+  int exit_status = EXIT_FAILURE;
+
   time_t current_time = time (NULL);
 
   num_tables = utility_get_option_string_table_size (arg_map) - 1;
@@ -4521,7 +4940,15 @@ flashback (UTIL_FUNCTION_ARG * arg)
 
       if (poll (&input_fd, 1, timeout * 1000))
 	{
-	  if (scanf ("%d", &trid) != 1)
+	  int scan_ret = scanf ("%d", &trid);
+	  if (scan_ret == EOF)
+	    {
+	      /* Non-interactive/EOF stdin (e.g. pipe or redirection): there is nothing to select, so quit
+	       * normally instead of looping forever. This is not an error, so return EXIT_SUCCESS. */
+	      exit_status = EXIT_SUCCESS;
+	      goto error_exit;
+	    }
+	  if (scan_ret != 1)
 	    {
 	      /* When non integer value is input, the input buffer must be flushed. */
 	      clean_stdin ();
@@ -4636,7 +5063,8 @@ error_exit:
       free_and_init (loginfo_list);
     }
 
-  return EXIT_FAILURE;
+  /* EXIT_FAILURE for every error path; EXIT_SUCCESS only when set for a clean non-interactive quit */
+  return exit_status;
 
 #else /* CS_MODE */
   fprintf (stderr, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_FLASHBACK, FLASHBACK_MSG_NOT_IN_STANDALONE),
@@ -4735,7 +5163,7 @@ memmon (UTIL_FUNCTION_ARG * arg)
 	    }
 	  goto error_exit;
 	}
-      fprintf (stdout, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_MEMMON, MEMMON_MSG_DISABLE_SUCCESS));
+      fprintf (stdout, "%s", msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_MEMMON, MEMMON_MSG_DISABLE_SUCCESS));
       goto success_exit;
     }
 
@@ -4790,4 +5218,148 @@ error_exit:
 	   basename (arg->argv0));
   return EXIT_FAILURE;
 #endif /* !CS_MODE */
+}
+
+/*
+ * cleanfiledb() - cleanfiledb main routine
+ *   return: EXIT_SUCCESS/EXIT_FAILURE
+ */
+int
+cleanfiledb (UTIL_FUNCTION_ARG * arg)
+{
+  UTIL_ARG_MAP *arg_map = arg->arg_map;
+  char er_msg_file[PATH_MAX];
+  const char *db_name;
+#if !defined(NDEBUG)
+  const char *target_vfid_str = NULL;
+#endif
+  const char *output_file = NULL;
+  FILE *outfp = NULL;
+  bool is_dump_file_list;
+  bool is_clean_invalid_file;
+
+  db_name = utility_get_option_string_value (arg_map, OPTION_STRING_TABLE, 0);
+  if (db_name == NULL)
+    {
+      goto print_cleanfiledb_usage;
+    }
+
+  output_file = utility_get_option_string_value (arg_map, CLEANFILEDB_OUTPUT_FILE_S, 0);
+  if (output_file == NULL)
+    {
+      outfp = stdout;
+    }
+  else
+    {
+      outfp = fopen (output_file, "w");
+      if (outfp == NULL)
+	{
+	  PRINT_AND_LOG_ERR_MSG (msgcat_message
+				 (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_CLEANFILEDB, CLEANFILEDB_MSG_BAD_OUTPUT),
+				 output_file);
+	  goto error_exit;
+	}
+    }
+
+  is_dump_file_list = utility_get_option_bool_value (arg_map, CLEANFILEDB_DUMP_FILE_LIST_S);
+  is_clean_invalid_file = utility_get_option_bool_value (arg_map, CLEANFILEDB_CLEAN_INVALID_FILE_S);
+#if !defined(NDEBUG)
+  /*
+   * INFO: Hidden option for debugging.
+   * Usage: -t, --clean-target-file=VFID
+   * Format: "fileid|volid" (e.g., "123|1")
+   */
+  target_vfid_str = utility_get_option_string_value (arg_map, CLEANFILEDB_DELETE_TARGET_FILE_S, 0);
+#endif
+
+  if (check_database_name (db_name))
+    {
+      goto error_exit;
+    }
+
+  /* error message log file */
+  snprintf (er_msg_file, sizeof (er_msg_file) - 1, "%s_%s.err", db_name, arg->command_name);
+  er_init (er_msg_file, ER_NEVER_EXIT);
+
+  AU_DISABLE_PASSWORDS ();
+
+  db_set_client_type (DB_CLIENT_TYPE_ADMIN_UTILITY);
+
+  db_login ("DBA", NULL);
+
+  if (db_restart (arg->command_name, TRUE, db_name) != NO_ERROR)
+    {
+      PRINT_AND_LOG_ERR_MSG ("%s\n", db_error_string (3));
+      goto error_exit;
+    }
+
+  // Execute with default settings (no command-line options provided)
+  if (!is_dump_file_list && !is_clean_invalid_file
+#if !defined(NDEBUG)
+      && target_vfid_str == NULL
+#endif
+    )
+    {
+      (void) file_dump_file_list (outfp, true);
+
+      fflush (outfp);
+    }
+  else
+    {
+      if (is_dump_file_list)
+	{
+	  (void) file_dump_file_list (outfp, false);
+
+	  fflush (outfp);
+	}
+
+      if (is_clean_invalid_file)
+	{
+	  int heap = 0, heap_ovf = 0, btree = 0, btree_ovf = 0;
+	  int total;
+
+	  if (file_clean_invalid_file (&heap, &heap_ovf, &btree, &btree_ovf) != NO_ERROR)
+	    {
+	      PRINT_AND_LOG_ERR_MSG ("%s\n", db_error_string (3));
+	      db_shutdown ();
+	      goto error_exit;
+	    }
+
+	  total = heap + heap_ovf + btree + btree_ovf;
+
+	  fprintf (outfp,
+		   msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_CLEANFILEDB, CLEANFILEDB_MSG_CLEAN_SUMMARY),
+		   db_name, heap, heap_ovf, btree, btree_ovf, total);
+
+	  fflush (outfp);
+	}
+#if !defined(NDEBUG)
+      else if (target_vfid_str != NULL)
+	{
+	  (void) file_delete_target_file (target_vfid_str);
+	}
+#endif
+    }
+
+  db_shutdown ();
+
+  if (output_file != NULL && outfp != NULL && outfp != stdout)
+    {
+      fclose (outfp);
+    }
+
+  return EXIT_SUCCESS;
+
+print_cleanfiledb_usage:
+  fprintf (stderr, msgcat_message (MSGCAT_CATALOG_UTILS, MSGCAT_UTIL_SET_CLEANFILEDB, CLEANFILEDB_MSG_USAGE),
+	   basename (arg->argv0));
+  util_log_write_errid (MSGCAT_UTIL_GENERIC_INVALID_ARGUMENT);
+
+error_exit:
+  if (output_file != NULL && outfp != NULL && outfp != stdout)
+    {
+      fclose (outfp);
+    }
+
+  return EXIT_FAILURE;
 }

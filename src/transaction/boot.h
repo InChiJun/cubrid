@@ -59,6 +59,11 @@
 	 || (client_type) == DB_CLIENT_TYPE_ADMIN_LOADDB_COMPAT_UNDER_11_2 \
 	 || (client_type) == DB_CLIENT_TYPE_ADMIN_LOADDB_COMPAT_UNDER_11_4)
 
+#define BOOT_IS_LOADDB_CLIENT_TYPE(client_type) \
+        ((client_type) == DB_CLIENT_TYPE_LOADDB_UTILITY \
+         || (client_type) == DB_CLIENT_TYPE_ADMIN_LOADDB_COMPAT_UNDER_11_2 \
+         || (client_type) == DB_CLIENT_TYPE_ADMIN_LOADDB_COMPAT_UNDER_11_4)
+
 #define BOOT_LOG_REPLICATOR_TYPE(client_type) \
         ((client_type) == DB_CLIENT_TYPE_LOG_COPIER \
          || (client_type) == DB_CLIENT_TYPE_LOG_APPLIER)
@@ -100,6 +105,12 @@
         || (client_type) == DB_CLIENT_TYPE_RW_BROKER_REPLICA_ONLY \
         || (client_type) == DB_CLIENT_TYPE_ADMIN_CSQL_WOS \
         || (client_type) == DB_CLIENT_TYPE_ADMIN_COMPACTDB_WOS)
+
+#define BOOT_BROKER_CLIENT_TYPE(client_type) \
+        ((client_type) == DB_CLIENT_TYPE_BROKER \
+         || (client_type) == DB_CLIENT_TYPE_READ_ONLY_BROKER \
+         || (client_type) == DB_CLIENT_TYPE_SLAVE_ONLY_BROKER \
+         || BOOT_REPLICA_ONLY_BROKER_CLIENT_TYPE (client_type))
 
 /*
  * BOOT_IS_ALLOWED_CLIENT_TYPE_IN_MT_MODE()

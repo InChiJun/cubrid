@@ -147,6 +147,8 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 
 #define PRM_NAME_HF_MAX_BESTSPACE_ENTRIES "max_bestspace_entries"
 
+#define PRM_NAME_AUTO_INCREMENT_CACHE_SIZE "auto_increment_cache_size"
+
 #define PRM_NAME_BT_UNFILL_FACTOR "index_unfill_factor"
 
 #define PRM_NAME_BT_OID_NBUFFERS "index_scan_oid_buffer_pages"
@@ -247,6 +249,10 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 #define PRM_NAME_HOSTVAR_LATE_BINDING "hostvar_late_binding"
 
 #define PRM_NAME_HOSTVAR_PEEKING "hostvar_peeking"
+
+#define PRM_NAME_DEFAULT_HISTOGRAM_BUCKET_COUNT "default_histogram_bucket_count"
+
+#define PRM_NAME_UPDATE_STATISTICS_UPDATE_HISTOGRAM "update_statistics_update_histogram"
 
 #define PRM_NAME_ENABLE_HISTO "communication_histogram"
 
@@ -728,7 +734,7 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 #define PRM_NAME_RECOVERY_PROGRESS_LOGGING_INTERVAL "recovery_progress_logging_interval"
 #define PRM_NAME_FIRST_LOG_PAGEID "first_log_pageid"
 
-#define PRM_NAME_THREAD_CORE_COUNT "thread_core_count"
+#define PRM_NAME_TASK_GROUP "task_group"
 
 #define PRM_NAME_FLASHBACK_TIMEOUT "flashback_timeout"
 #define PRM_NAME_FLASHBACK_MAX_TRANSACTION "flashback_max_transaction"
@@ -743,7 +749,7 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 
 #define PRM_NAME_PL_TRANSACTION_CONTROL "pl_transaction_control"
 
-#define PRM_NAME_PAGE_LATCH_TIMEOUT "page_latch_timeout"
+#define PRM_NAME_PAGE_LATCH_TIMEOUT_IN_MSECS "page_latch_timeout_in_msecs"
 
 #define PRM_VALUE_DEFAULT "DEFAULT"
 #define PRM_VALUE_MAX "MAX"
@@ -773,11 +779,42 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 
 #define PRM_NAME_PARALLELISM "parallelism"
 #define PRM_NAME_MAX_PARALLEL_WORKERS "max_parallel_workers"
-#define PRM_NAME_PARALLEL_HEAP_SCAN_PAGE_THRESHOLD "parallel_heap_scan_page_threshold"
+#define PRM_NAME_PARALLEL_SCAN_PAGE_THRESHOLD "parallel_scan_page_threshold"
+#define PRM_NAME_PARALLEL_INDEX_SCAN_PAGE_THRESHOLD "parallel_index_scan_page_threshold"
 #define PRM_NAME_PARALLEL_HASH_JOIN_PAGE_THRESHOLD "parallel_hash_join_page_threshold"
 #define PRM_NAME_PARALLEL_SORT_PAGE_THRESHOLD "parallel_sort_page_threshold"
 
+#define PRM_NAME_TCP_KEEPALIVE_IDLE "tcp_keepalive_idle"
+#define PRM_NAME_TCP_KEEPALIVE_INTERVAL "tcp_keepalive_interval"
+#define PRM_NAME_TCP_KEEPALIVE_COUNT "tcp_keepalive_count"
+
+#define PRM_NAME_TASK_WORKER "task_worker"
+
+#define PRM_NAME_CSS_MAX_CONNECTION_WORKER "max_connection_worker"
+#define PRM_NAME_CSS_MIN_CONNECTION_WORKER "min_connection_worker"
+
+#define PRM_NAME_CSS_AUTO_SCALING_WINDOW_SIZE "auto_scaling_window_size"
+
+#define PRM_NAME_CSS_RECV_BUDGET_PER_CONNECTION "recv_budget_per_connection"
+#define PRM_NAME_CSS_SEND_BUDGET_PER_CONNECTION "send_budget_per_connection"
+
 #define PRM_NAME_MEMOIZE_MEMORY_LIMIT "memoize_memory_limit"
+
+#define PRM_NAME_LOG_POSTPONE_CACHE_SIZE "postpone_cache_size"
+
+#define PRM_NAME_HARDWARE_AFFINITY "hardware_affinity"
+
+#define PRM_NAME_BESTSPACE_SHARD_COUNT "bestspace_shard_count"
+#define PRM_NAME_BESTSPACE_DISTRIBUTED_INSERT "bestspace_distributed_insert"
+#define PRM_NAME_BESTSPACE_CACHE_COUNT "bestspace_cache_count"
+
+#define PRM_NAME_ENABLE_LAZY_PREDICATE_READ "enable_lazy_predicate_read"
+
+#define PRM_NAME_STATISTICS_SAMPLING_THRESHOLD_PAGES "statistics_sampling_threshold_pages"
+
+#define PRM_NAME_STATISTICS_SAMPLE_PAGES "statistics_sample_pages"
+
+#define PRM_NAME_PLAN_CACHE_BIND_SENSITIVITY "plan_cache_bind_sensitivity"
 
 // #endregion 
 
@@ -943,8 +980,8 @@ static const char sysprm_ha_conf_file_name[] = "cubrid_ha.conf";
 #define PRM_DEFAULT_BUFFER_SIZE 256
 
 /* initial error and integer lists */
-static int int_list_initial[1] = { 0 };
-static int prm_stored_procedure_return_numeric_size_default_arr[] = { 2, 38, 15 };
+static const int int_list_initial[1] = { 0 };
+static const int prm_stored_procedure_return_numeric_size_default_arr[] = { 2, 38, 15 };
 
 #if !defined (SERVER_MODE) && !defined (SA_MODE)
 #define LOGPB_BUFFER_NPAGES_LOWER 128
@@ -987,6 +1024,27 @@ static int prm_equal_to_ori (void *out_val, SYSPRM_DATATYPE out_type, void *in_v
 #if defined(SERVER_MODE)
 static void update_session_state_from_sys_params (THREAD_ENTRY * thread_p, SESSION_PARAM * session_params);
 #endif
+
+#if defined (SERVER_MODE)
+/*
+ * prm_default_max_connection_worker () - built-in default value of max_connection_worker
+ *   return: half of the cores available to the server, but never less than one
+ *
+ * Note: cubthread::system_core_count () returns 1 on a single core machine and also when the server
+ *       is restricted to a single core (taskset, docker --cpuset-cpus, cpu manager, ...). Halving it
+ *       without a lower bound gives 0, and a connection pool with no connection worker cannot serve
+ *       any client. The lower bound is the lower limit declared for the parameter.
+ */
+static int
+prm_default_max_connection_worker (void)
+{
+  int half_of_cores;
+
+  half_of_cores = (int) cubthread::system_core_count () / 2;
+
+  return half_of_cores < 1 ? 1 : half_of_cores;
+}
+#endif /* SERVER_MODE */
 
 static const SYSPRM_PARAM_VALUE NULL_SYSPRM_PARAM_VALUE = { true, {.str = NULL} };
 
@@ -1174,12 +1232,13 @@ SYSPRM_PARAM prm_Def[] = {
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_HF_MAX_BESTSPACE_ENTRIES,
    PRM_NAME_HF_MAX_BESTSPACE_ENTRIES,
-   (PRM_FOR_SERVER | PRM_HIDDEN | PRM_USER_CHANGE),
+   (PRM_FOR_SERVER | PRM_HIDDEN | PRM_USER_CHANGE | PRM_OBSOLETED),
    PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.i = 1000000 /* 110 M */ }},
    {false, {.i = 1000000}},
-   NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
@@ -2123,7 +2182,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -2134,14 +2193,15 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_COMPAT_NUMERIC_DIVISION_SCALE,
    PRM_NAME_COMPAT_NUMERIC_DIVISION_SCALE,
-   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_USER_CHANGE | PRM_FOR_SESSION | PRM_FOR_HA_CONTEXT | PRM_FOR_PL_CONTEXT),
+   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_USER_CHANGE | PRM_FOR_HA_CONTEXT | PRM_FOR_PL_CONTEXT | PRM_HIDDEN |
+    PRM_DEPRECATED),
    PRM_BOOLEAN,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.b = false}},
@@ -2558,7 +2618,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -2569,7 +2629,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -3106,7 +3166,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -3139,7 +3199,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -3318,12 +3378,11 @@ SYSPRM_PARAM prm_Def[] = {
   {PRM_ID_SQL_TRACE_EXECUTION_PLAN,
    PRM_NAME_SQL_TRACE_EXECUTION_PLAN,
    (PRM_USER_CHANGE | PRM_FOR_SERVER),
-   PRM_BOOLEAN,
+   PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
-   {false, {.b = false}},
-   {false, {.b = false}},
-   NULL_SYSPRM_PARAM_VALUE,
-   NULL_SYSPRM_PARAM_VALUE,
+   {false, {.i = 0}},
+   {false, {.i = 0}},
+   {false, {.i = 2}}, {false, {.i = 0}},
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
@@ -3940,7 +3999,7 @@ SYSPRM_PARAM prm_Def[] = {
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.integer_list = NULL}},
-   {false, {.integer_list = int_list_initial}},
+   {false, {.integer_list = (int *) int_list_initial}},
    NULL_SYSPRM_PARAM_VALUE,
    NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
@@ -4548,7 +4607,7 @@ SYSPRM_PARAM prm_Def[] = {
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_JAVA_STORED_PROCEDURE,
    PRM_NAME_JAVA_STORED_PROCEDURE,
-   (PRM_FOR_SERVER | PRM_DEPRECATED | PRM_HIDDEN),
+   (PRM_FOR_SERVER | PRM_FORCE_SERVER | PRM_RELOADABLE | PRM_DEPRECATED | PRM_HIDDEN),
    PRM_BOOLEAN,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.b = true}},
@@ -4715,19 +4774,20 @@ SYSPRM_PARAM prm_Def[] = {
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
-  {PRM_ID_THREAD_CORE_COUNT,
-   PRM_NAME_THREAD_CORE_COUNT,
+  {PRM_ID_TASK_GROUP,
+   PRM_NAME_TASK_GROUP,
    (PRM_FOR_SERVER),
    PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
 #if defined (SERVER_MODE)
    {false, {.i = (int) cubthread::system_core_count ()}},
    {false, {.i = (int) cubthread::system_core_count ()}},
+   {false, {.i = (int) cubthread::system_core_count ()}},
 #else
    {false, {.i = 1}},
    {false, {.i = 1}},
+   NULL_SYSPRM_PARAM_VALUE,
 #endif
-   {false, {.i = 1024}},
    {false, {.i = 1}},
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -4980,7 +5040,7 @@ SYSPRM_PARAM prm_Def[] = {
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_STORED_PROCEDURE,
    PRM_NAME_STORED_PROCEDURE,
-   (PRM_FOR_SERVER | PRM_FORCE_SERVER),
+   (PRM_FOR_SERVER | PRM_FORCE_SERVER | PRM_RELOADABLE),
    PRM_BOOLEAN,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.b = true}},
@@ -5046,10 +5106,10 @@ SYSPRM_PARAM prm_Def[] = {
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_STORED_PROCEDURE_RETURN_NUMERIC_SIZE,
    PRM_NAME_STORED_PROCEDURE_RETURN_NUMERIC_SIZE,
-   (PRM_FOR_CLIENT | PRM_FOR_SERVER),
+   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_HIDDEN | PRM_DEPRECATED),
    PRM_INTEGER_LIST,
    PRM_CLEAR_DYNAMIC_FLAG,
-   {false, {.integer_list = prm_stored_procedure_return_numeric_size_default_arr}},
+   {false, {.integer_list = (int *) prm_stored_procedure_return_numeric_size_default_arr}},
    {false, {.integer_list = NULL}},
    NULL_SYSPRM_PARAM_VALUE, NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
@@ -5084,7 +5144,7 @@ SYSPRM_PARAM prm_Def[] = {
    (DUP_PRM_FUNC) NULL},
   {PRM_ID_PARALLELISM,
    PRM_NAME_PARALLELISM,
-   (PRM_FOR_SERVER),
+   (PRM_FOR_SERVER | PRM_FOR_CLIENT | PRM_FORCE_SERVER),
    PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.i = 4}},
@@ -5106,13 +5166,25 @@ SYSPRM_PARAM prm_Def[] = {
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
-  {PRM_ID_PARALLEL_HEAP_SCAN_PAGE_THRESHOLD,
-   PRM_NAME_PARALLEL_HEAP_SCAN_PAGE_THRESHOLD,
+  {PRM_ID_PARALLEL_SCAN_PAGE_THRESHOLD,
+   PRM_NAME_PARALLEL_SCAN_PAGE_THRESHOLD,
    (PRM_FOR_SERVER | PRM_HIDDEN),
    PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
    {false, {.i = 2048}},
    {false, {.i = 2048}},
+   {false, {.i = INT_MAX}},
+   {false, {.i = 0}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_PARALLEL_INDEX_SCAN_PAGE_THRESHOLD,
+   PRM_NAME_PARALLEL_INDEX_SCAN_PAGE_THRESHOLD,
+   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_FORCE_SERVER | PRM_HIDDEN),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 32}},
+   {false, {.i = 32}},
    {false, {.i = INT_MAX}},
    {false, {.i = 0}},
    (char *) NULL,
@@ -5142,14 +5214,137 @@ SYSPRM_PARAM prm_Def[] = {
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
    (DUP_PRM_FUNC) NULL},
-  {PRM_ID_PAGE_LATCH_TIMEOUT,
-   PRM_NAME_PAGE_LATCH_TIMEOUT,
+  {PRM_ID_TCP_KEEPALIVE_IDLE,
+   PRM_NAME_TCP_KEEPALIVE_IDLE,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 300 /* 5 min */ }},
+   {false, {.i = 300 /* 5 min */ }},
+   {false, {.i = 60 * 60 * 24 * 365 /* 1 year */ }},
+   {false, {.i = 60 /* 1 min */ }},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_TCP_KEEPALIVE_INTERVAL,	/* probe interval */
+   PRM_NAME_TCP_KEEPALIVE_INTERVAL,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 300 /* 5 min */ }},
+   {false, {.i = 300 /* 5 min */ }},
+   {false, {.i = 60 * 60 * 24 * 365 /* 1 year */ }},
+   {false, {.i = 60 /* 1 min */ }},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_TCP_KEEPALIVE_COUNT,	/* retry count */
+   PRM_NAME_TCP_KEEPALIVE_COUNT,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 3}},
+   {false, {.i = 3}},
+   {false, {.i = 32}},
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_TASK_WORKER,
+   PRM_NAME_TASK_WORKER,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = -1}},
+   {false, {.i = -1}},
+   {false, {.i = 1048576}},
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_CSS_MAX_CONNECTION_WORKER,
+   PRM_NAME_CSS_MAX_CONNECTION_WORKER,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+#if defined (SERVER_MODE)
+   {false, {.i = prm_default_max_connection_worker ()}},
+   {false, {.i = prm_default_max_connection_worker ()}},
+   {false, {.i = (int) cubthread::system_core_count ()}},
+#else
+   /* TODO: unused - the connection pool is server-only; to be removed */
+   {false, {.i = 2}},
+   {false, {.i = 2}},
+   NULL_SYSPRM_PARAM_VALUE,
+#endif
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_CSS_MIN_CONNECTION_WORKER,
+   PRM_NAME_CSS_MIN_CONNECTION_WORKER,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 4}},
+   {false, {.i = 4}},
+#if defined (SERVER_MODE)
+   {false, {.i = (int) cubthread::system_core_count ()}},
+#else
+   NULL_SYSPRM_PARAM_VALUE,
+#endif
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_CSS_AUTO_SCALING_WINDOW_SIZE,
+   PRM_NAME_CSS_AUTO_SCALING_WINDOW_SIZE,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 4}},
+   {false, {.i = 4}},
+#if defined (SERVER_MODE)
+   {false, {.i = (int) cubthread::system_core_count ()}},
+#else
+   NULL_SYSPRM_PARAM_VALUE,
+#endif
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_CSS_RECV_BUDGET_PER_CONNECTION,
+   PRM_NAME_CSS_RECV_BUDGET_PER_CONNECTION,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 16 * 1024}},	/* 16KB */
+   {false, {.i = 16 * 1024}},	/* 16KB */
+   {false, {.i = 1 * 1024 * 1024 * 1024}},	/* 1GB */
+   {false, {.i = 0}},		/* no limit */
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_CSS_SEND_BUDGET_PER_CONNECTION,
+   PRM_NAME_CSS_SEND_BUDGET_PER_CONNECTION,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 32 * 1024}},	/* 32KB */
+   {false, {.i = 32 * 1024}},	/* 32KB */
+   {false, {.i = 1 * 1024 * 1024 * 1024}},	/* 1GB */
+   {false, {.i = 0}},		/* no limit */
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_PAGE_LATCH_TIMEOUT_IN_MSECS,
+   PRM_NAME_PAGE_LATCH_TIMEOUT_IN_MSECS,
    (PRM_FOR_SERVER | PRM_HIDDEN),
    PRM_INTEGER,
    PRM_CLEAR_DYNAMIC_FLAG,
-   {false, {.i = 300}},
-   {false, {.i = 300}},
-   {false, {.i = 3000}},
+   {false, {.i = 300 * 1000}},
+   {false, {.i = 300 * 1000}},
+   {false, {.i = 3000 * 1000}},
    {false, {.i = 0}},
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
@@ -5177,12 +5372,156 @@ SYSPRM_PARAM prm_Def[] = {
    NULL_SYSPRM_PARAM_VALUE,
    (char *) NULL,
    (DUP_PRM_FUNC) NULL,
-   (DUP_PRM_FUNC) NULL}
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_DEFAULT_HISTOGRAM_BUCKET_COUNT,
+   PRM_NAME_DEFAULT_HISTOGRAM_BUCKET_COUNT,
+   (PRM_FOR_CLIENT | PRM_USER_CHANGE),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 300}},
+   {false, {.i = 300}},
+   {false, {.i = 1000}},
+   {false, {.i = 4}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_LOG_POSTPONE_CACHE_SIZE,
+   PRM_NAME_LOG_POSTPONE_CACHE_SIZE,
+   (PRM_FOR_SERVER | PRM_HIDDEN),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 512}},
+   {false, {.i = 512}},
+   {false, {.i = 4096}},
+   {false, {.i = 4}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_UPDATE_STATISTICS_UPDATE_HISTOGRAM,
+   PRM_NAME_UPDATE_STATISTICS_UPDATE_HISTOGRAM,
+   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_USER_CHANGE | PRM_DEPRECATED),
+   PRM_BOOLEAN,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.b = true}},
+   {false, {.b = true}},
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_HARDWARE_AFFINITY,
+   PRM_NAME_HARDWARE_AFFINITY,
+   (PRM_FOR_SERVER),
+   PRM_BOOLEAN,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.b = false}},
+   {false, {.b = false}},
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_BESTSPACE_SHARD_COUNT,
+   PRM_NAME_BESTSPACE_SHARD_COUNT,
+   (PRM_FOR_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 8}},
+   {false, {.i = 8}},
+   {false, {.i = 28}},
+   {false, {.i = 1}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_BESTSPACE_DISTRIBUTED_INSERT,
+   PRM_NAME_BESTSPACE_DISTRIBUTED_INSERT,
+   (PRM_FOR_SERVER | PRM_HIDDEN),
+   PRM_BOOLEAN,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.b = false}},
+   {false, {.b = false}},
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_BESTSPACE_CACHE_COUNT,
+   PRM_NAME_BESTSPACE_CACHE_COUNT,
+   (PRM_FOR_SERVER | PRM_HIDDEN),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 40}},
+   {false, {.i = 40}},
+   {false, {.i = 128}},
+   {false, {.i = 10}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_AUTO_INCREMENT_CACHE_SIZE,
+   PRM_NAME_AUTO_INCREMENT_CACHE_SIZE,
+   (PRM_FOR_CLIENT | PRM_FOR_SERVER | PRM_FORCE_SERVER),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 20}},
+   {false, {.i = 20}},
+   NULL_SYSPRM_PARAM_VALUE,
+   {false, {.i = 0}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_ENABLE_LAZY_PREDICATE_READ,
+   PRM_NAME_ENABLE_LAZY_PREDICATE_READ,
+   (PRM_FOR_SERVER | PRM_HIDDEN | PRM_USER_CHANGE),
+   PRM_BOOLEAN,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.b = true}},
+   {false, {.b = true}},
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_STATISTICS_SAMPLING_THRESHOLD_PAGES,
+   PRM_NAME_STATISTICS_SAMPLING_THRESHOLD_PAGES,
+   (PRM_FOR_SERVER | PRM_USER_CHANGE),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 0}},
+   {false, {.i = 0}},
+   {false, {.i = INT_MAX}},
+   {false, {.i = 0}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_STATISTICS_SAMPLE_PAGES,
+   PRM_NAME_STATISTICS_SAMPLE_PAGES,
+   (PRM_FOR_SERVER | PRM_USER_CHANGE),
+   PRM_INTEGER,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.i = 10000}},
+   {false, {.i = 10000}},
+   {false, {.i = 10000000}},
+   {false, {.i = 0}},
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
+  {PRM_ID_PLAN_CACHE_BIND_SENSITIVITY,
+   PRM_NAME_PLAN_CACHE_BIND_SENSITIVITY,
+   (PRM_FOR_CLIENT | PRM_USER_CHANGE),
+   PRM_BOOLEAN,
+   PRM_CLEAR_DYNAMIC_FLAG,
+   {false, {.b = false}},
+   {false, {.b = false}},
+   NULL_SYSPRM_PARAM_VALUE,
+   NULL_SYSPRM_PARAM_VALUE,
+   (char *) NULL,
+   (DUP_PRM_FUNC) NULL,
+   (DUP_PRM_FUNC) NULL},
 };
 
 SYSPRM_INDIRECT_POS prm_Def_session_idx[DIM (prm_Def)];
 
-static int prm_Def_size = (int) (DIM (prm_Def));
+static const int prm_Def_size = (int) (DIM (prm_Def));
 #define MAX_SYSTEM_PARAMS  prm_Def_size
 
 static int num_session_parameters = 0;
@@ -5246,7 +5585,7 @@ struct keyval
   int val;
 };
 
-static KEYVAL boolean_words[] = {
+static const KEYVAL boolean_words[] = {
   {"yes", 1},
   {"y", 1},
   {"1", 1},
@@ -5259,7 +5598,7 @@ static KEYVAL boolean_words[] = {
   {"off", 0}
 };
 
-static KEYVAL er_log_level_words[] = {
+static const KEYVAL er_log_level_words[] = {
   {"fatal", ER_FATAL_ERROR_SEVERITY},
   {"error", ER_ERROR_SEVERITY},
   {"syntax", ER_SYNTAX_ERROR_SEVERITY},
@@ -5267,7 +5606,7 @@ static KEYVAL er_log_level_words[] = {
   {"notification", ER_NOTIFICATION_SEVERITY}
 };
 
-static KEYVAL isolation_level_words[] = {
+static const KEYVAL isolation_level_words[] = {
   {"tran_serializable", TRAN_SERIALIZABLE},
   {"tran_no_phantom_read", TRAN_SERIALIZABLE},
 
@@ -5287,18 +5626,18 @@ static KEYVAL isolation_level_words[] = {
   {"cursor_stability", TRAN_READ_COMMITTED},
 };
 
-static KEYVAL pgbuf_debug_page_validation_level_words[] = {
+static const KEYVAL pgbuf_debug_page_validation_level_words[] = {
   {"fetch", PGBUF_DEBUG_PAGE_VALIDATION_FETCH},
   {"free", PGBUF_DEBUG_PAGE_VALIDATION_FREE},
   {"all", PGBUF_DEBUG_PAGE_VALIDATION_ALL}
 };
 
-static KEYVAL null_words[] = {
+static const KEYVAL null_words[] = {
   {"null", 0},
   {"0", 0}
 };
 
-static KEYVAL ha_mode_words[] = {
+static const KEYVAL ha_mode_words[] = {
   {HA_MODE_OFF_STR, HA_MODE_OFF},
   {"no", HA_MODE_OFF},
   {"n", HA_MODE_OFF},
@@ -5320,7 +5659,7 @@ static KEYVAL ha_mode_words[] = {
   {"2", HA_MODE_REPLICA}
 };
 
-static KEYVAL ha_server_state_words[] = {
+static const KEYVAL ha_server_state_words[] = {
   {HA_SERVER_STATE_IDLE_STR, HA_SERVER_STATE_IDLE},
   {HA_SERVER_STATE_ACTIVE_STR, HA_SERVER_STATE_ACTIVE},
   {HA_SERVER_STATE_TO_BE_ACTIVE_STR, HA_SERVER_STATE_TO_BE_ACTIVE},
@@ -5330,7 +5669,7 @@ static KEYVAL ha_server_state_words[] = {
   {HA_SERVER_STATE_DEAD_STR, HA_SERVER_STATE_DEAD}
 };
 
-static KEYVAL ha_log_applier_state_words[] = {
+static const KEYVAL ha_log_applier_state_words[] = {
   {HA_LOG_APPLIER_STATE_UNREGISTERED_STR, HA_LOG_APPLIER_STATE_UNREGISTERED},
   {HA_LOG_APPLIER_STATE_RECOVERING_STR, HA_LOG_APPLIER_STATE_RECOVERING},
   {HA_LOG_APPLIER_STATE_WORKING_STR, HA_LOG_APPLIER_STATE_WORKING},
@@ -5338,36 +5677,36 @@ static KEYVAL ha_log_applier_state_words[] = {
   {HA_LOG_APPLIER_STATE_ERROR_STR, HA_LOG_APPLIER_STATE_ERROR}
 };
 
-static KEYVAL compat_words[] = {
+static const KEYVAL compat_words[] = {
   {"cubrid", COMPAT_CUBRID},
   {"default", COMPAT_CUBRID},
   {"mysql", COMPAT_MYSQL},
   {"oracle", COMPAT_ORACLE}
 };
 
-static KEYVAL check_peer_alive_words[] = {
+static const KEYVAL check_peer_alive_words[] = {
   {"none", CSS_CHECK_PEER_ALIVE_NONE},
   {"server_only", CSS_CHECK_PEER_ALIVE_SERVER_ONLY},
   {"client_only", CSS_CHECK_PEER_ALIVE_CLIENT_ONLY},
   {"both", CSS_CHECK_PEER_ALIVE_BOTH},
 };
 
-static KEYVAL query_trace_format_words[] = {
+static const KEYVAL query_trace_format_words[] = {
   {"text", QUERY_TRACE_TEXT},
   {"json", QUERY_TRACE_JSON},
 };
 
-static KEYVAL fi_test_words[] = {
+static const KEYVAL fi_test_words[] = {
   {"recovery", FI_GROUP_RECOVERY},
 };
 
-static KEYVAL ha_repl_filter_type_words[] = {
+static const KEYVAL ha_repl_filter_type_words[] = {
   {"none", REPL_FILTER_NONE},
   {"include_table", REPL_FILTER_INCLUDE_TBL},
   {"exclude_table", REPL_FILTER_EXCLUDE_TBL}
 };
 
-static KEYVAL tde_algorithm_words[] = {
+static const KEYVAL tde_algorithm_words[] = {
   /* {"none", TDE_ALGORITHM_NONE}, */
   {"aes", TDE_ALGORITHM_AES},
   {"aria", TDE_ALGORITHM_ARIA}
@@ -5375,7 +5714,7 @@ static KEYVAL tde_algorithm_words[] = {
 
 /* *INDENT-OFF* */
 using namespace cubregex;
-static KEYVAL regexp_engine_words[] = {
+static const KEYVAL regexp_engine_words[] = {
   {get_engine_name(engine_type::LIB_CPPSTD), engine_type::LIB_CPPSTD},
   {get_engine_name(engine_type::LIB_RE2), engine_type::LIB_RE2}
 };
@@ -5812,35 +6151,42 @@ sysprm_set_er_log_file (const char *db_name)
 static void
 sysprm_check_id_order ()
 {
-  static bool is_first = true;
-  if (is_first)
-    {
-      int i, k;
-      const int *ptr;
-      assert (GET_PRM (0)->id == PRM_FIRST_ID);
-      for (i = 1; i < MAX_SYSTEM_PARAMS; i++)
-	{
-	  assert (GET_PRM (i - 1)->id == ((GET_PRM (i)->id) - 1));
-	  assert (GET_PRM (i)->id == (PARAM_ID) i);
-	}
+  static bool is_initialized =[](){
+    int i, k;
+    const int *ptr;
+    assert (GET_PRM (0)->id == PRM_FIRST_ID);
+    for (i = 1; i < MAX_SYSTEM_PARAMS; i++)
+      {
+	assert (GET_PRM (i - 1)->id == ((GET_PRM (i)->id) - 1));
+	assert (GET_PRM (i)->id == (PARAM_ID) i);
+      }
 
-      for (i = 0; PARAM_VALUE_SHARE[i] != NULL; i++)
-	{
-	  ptr = PARAM_VALUE_SHARE[i];
-	  assert (ptr[0] >= 2);
-	  for (k = 1; k < ptr[0]; k++)
-	    {
-	      assert (ptr[k] < ptr[k + 1]);
-	    }
+    for (i = 0; PARAM_VALUE_SHARE[i] != NULL; i++)
+      {
+	ptr = PARAM_VALUE_SHARE[i];
+	assert (ptr[0] >= 2);
+	for (k = 1; k < ptr[0]; k++)
+	  {
+	    assert (ptr[k] < ptr[k + 1]);
+	  }
 
-	  if (i > 0)
-	    {
-	      assert (ptr[1] > PARAM_VALUE_SHARE[i - 1][1]);
-	    }
-	}
+	if (i > 0)
+	  {
+	    assert (ptr[1] > PARAM_VALUE_SHARE[i - 1][1]);
+	  }
+      }
 
-      is_first = false;
-    }
+    return true;
+  }
+  ();
+
+  assert (is_initialized == true);
+  /* Notice:
+   * This ensures the variable is not optimized away, even though it does not change the functional logic of the code
+   * Please do not delete the following two lines.
+   */
+  (void) is_initialized;	// Dummy Reference  
+  *(volatile bool *) &is_initialized;
 }
 #endif
 
@@ -5869,9 +6215,6 @@ sysprm_load_and_init_internal (const char *db_name, const char *conf_file, bool 
   SESSION_PARAM *sprm = NULL;
   int num_session_prms;
 #endif
-
-  /* TODO: conf_file is always NULL. Therefore, you need to decide whether to keep this argument. */
-  assert (conf_file == NULL);
 
 #ifndef NDEBUG
   sysprm_check_id_order ();
@@ -8932,22 +9275,6 @@ sysprm_generate_new_value (SYSPRM_PARAM * prm, const char *value, bool check, SY
 	    val[0] = list_size;
 	  }
 
-	if (prm->id == PRM_ID_STORED_PROCEDURE_RETURN_NUMERIC_SIZE)
-	  {
-	    /*  
-	     *  The length of the parameter must be 2
-	     *  Check the valid range
-	     *    precision ( 1 ~ 38 ) and scale (0 ~ 38)
-	     *    precision >= scale
-	     */
-	    if (val[0] != 2 || val[PRM_PRECISION] < 1 || val[PRM_PRECISION] > DB_MAX_NUMERIC_PRECISION
-		|| val[PRM_SCALE] < 0 || val[PRM_SCALE] > val[PRM_PRECISION])
-	      {
-		free_and_init (val);
-		return PRM_ERR_BAD_VALUE;
-	      }
-	  }
-
 	new_value->integer_list = val;
 	break;
       }
@@ -9723,13 +10050,18 @@ prm_tune_parameters (void)
   SYSPRM_PARAM *call_stack_dump_activation_prm;
   SYSPRM_PARAM *test_mode_prm;
   SYSPRM_PARAM *tz_leap_second_support_prm;
+  SYSPRM_PARAM *task_worker_prm;
+  SYSPRM_PARAM *task_group_prm;
 #if defined (SERVER_MODE)
-  SYSPRM_PARAM *thread_core_count_prm;
   SYSPRM_PARAM *max_parallel_workers_prm;
   SYSPRM_PARAM *parallelism_prm;
+  SYSPRM_PARAM *max_connection_workers_prm;
+  SYSPRM_PARAM *min_connection_workers_prm;
 #endif
   char newval[LINE_MAX];
   char host_name[CUB_MAXHOSTNAMELEN];
+  int system_cpu_count;
+  int task_worker;
   int max_clients;
 
   /* Find the parameters that require tuning */
@@ -9776,14 +10108,46 @@ prm_tune_parameters (void)
 	}
 
 #if defined (SERVER_MODE)
-      thread_core_count_prm = GET_PRM (PRM_ID_THREAD_CORE_COUNT);
-      int safe_core_count = (css_get_max_workers () / 3);
-      int system_cpu_count = cubthread::system_core_count ();
-      int core_upper_limit = MIN (safe_core_count, system_cpu_count);
-      if (PRM_GET_INT (thread_core_count_prm->value) > core_upper_limit)
+      system_cpu_count = cubthread::system_core_count ();
+      task_worker = css_get_max_connections ();
+#else
+      system_cpu_count = 1;
+      task_worker = system_cpu_count * 6;
+#endif
+
+      task_worker_prm = GET_PRM (PRM_ID_TASK_WORKER);
+      if (PRM_GET_INT (task_worker_prm->value) < 0)
 	{
-	  sprintf (newval, "%d", core_upper_limit);
-	  (void) prm_set (thread_core_count_prm, newval, false);
+	  /* the value of task worker is default. */
+	  sprintf (newval, "%d", task_worker);
+	  (void) prm_set (task_worker_prm, newval, false);
+	}
+
+      task_group_prm = GET_PRM (PRM_ID_TASK_GROUP);
+      if (PRM_GET_INT (task_group_prm->value) > system_cpu_count)
+	{
+	  sprintf (newval, "%d", system_cpu_count);
+	  (void) prm_set (task_group_prm, newval, false);
+	}
+      if (PRM_GET_INT (task_group_prm->value) > PRM_GET_INT (task_worker_prm->value))
+	{
+	  sprintf (newval, "%d", PRM_GET_INT (task_worker_prm->value));
+	  (void) prm_set (task_group_prm, newval, false);
+	}
+
+#if defined (SERVER_MODE)
+      max_connection_workers_prm = GET_PRM (PRM_ID_CSS_MAX_CONNECTION_WORKER);
+      min_connection_workers_prm = GET_PRM (PRM_ID_CSS_MIN_CONNECTION_WORKER);
+
+      if (PRM_GET_INT (max_connection_workers_prm->value) > system_cpu_count)
+	{
+	  sprintf (newval, "%d", system_cpu_count);
+	  (void) prm_set (max_connection_workers_prm, newval, false);
+	}
+      if (PRM_GET_INT (min_connection_workers_prm->value) > PRM_GET_INT (max_connection_workers_prm->value))
+	{
+	  sprintf (newval, "%d", PRM_GET_INT (max_connection_workers_prm->value));
+	  (void) prm_set (min_connection_workers_prm, newval, false);
 	}
 
       /* set parallelism to system_cpu_count if it is greater than cubthread::system_core_count () */
@@ -9804,15 +10168,14 @@ prm_tune_parameters (void)
 
       if (PRM_GET_BOOL (test_mode_prm->value) == true)
 	{
-	  SYSPRM_PARAM *heap_scan_page_threshold_prm = GET_PRM (PRM_ID_PARALLEL_HEAP_SCAN_PAGE_THRESHOLD);
+	  SYSPRM_PARAM *scan_page_threshold_prm = GET_PRM (PRM_ID_PARALLEL_SCAN_PAGE_THRESHOLD);
 	  SYSPRM_PARAM *hash_join_page_threshold_prm = GET_PRM (PRM_ID_PARALLEL_HASH_JOIN_PAGE_THRESHOLD);
 	  SYSPRM_PARAM *sort_page_threshold_prm = GET_PRM (PRM_ID_PARALLEL_SORT_PAGE_THRESHOLD);
 
-	  if (PRM_GET_INT (heap_scan_page_threshold_prm->value) ==
-	      PRM_GET_INT (heap_scan_page_threshold_prm->default_value))
+	  if (PRM_GET_INT (scan_page_threshold_prm->value) == PRM_GET_INT (scan_page_threshold_prm->default_value))
 	    {
 	      sprintf (newval, "%d", 32);	/* TODO: 0 ? */
-	      (void) prm_set (heap_scan_page_threshold_prm, newval, false);
+	      (void) prm_set (scan_page_threshold_prm, newval, false);
 	    }
 
 	  if (PRM_GET_INT (hash_join_page_threshold_prm->value) ==

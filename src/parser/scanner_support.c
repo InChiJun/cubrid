@@ -47,12 +47,6 @@ int parser_input_host_index = 0;
 int parser_statement_OK = 0;
 PARSER_CONTEXT *this_parser;
 int parser_output_host_index = 0;
-extern "C"
-{
-  extern int yycolumn;
-  extern int csql_yyget_lineno ();
-}
-extern int yycolumn_end;
 
 
 #if defined(SA_MODE) && !defined(NDEBUG)
@@ -258,8 +252,8 @@ pt_parser_line_col (PT_NODE * node)
   if (node == NULL)
     return;
 
-  node->line_number = csql_yyget_lineno ();
-  node->column_number = yycolumn;
+  node->line_number = yytoken_start_line;
+  node->column_number = yytoken_start_column;
 }
 
 /*
@@ -287,54 +281,51 @@ hint_token_cmp (const void *a, const void *b)
 void
 pt_initialize_hint (PARSER_CONTEXT * parser, PT_HINT hint_table[])
 {
-  static int was_initialized = 0;
 
 #if defined(ENABLE_WRITE_HINT_LOG)
   s_hint_msg.stmt_no = -1;
 #endif
 
-  if (was_initialized)
-    {
-      return;
-    }
+  static bool was_initialized =[](PT_HINT hint_table[]){
+    int i;
 
-  int i;
-
-  memset (hint_table_lead_offset, 0x00, sizeof (hint_table_lead_offset));
-  for (i = 0; hint_table[i].tokens; i++)
-    {
+    memset (hint_table_lead_offset, 0x00, sizeof (hint_table_lead_offset));
+    for (i = 0; hint_table[i].tokens; i++)
+      {
 #ifndef NDEBUG
-      char *p;
-      for (p = (char *) hint_table[i].tokens; *p; p++)
-	{
-	  assert (toupper (*p) == *p);
-	}
+	char *p;
+	for (p = (char *) hint_table[i].tokens; *p; p++)
+	  {
+	    assert (toupper (*p) == *p);
+	  }
 #endif
-      hint_table[i].is_hit = false;
-      hint_table[i].length = (int) strlen (hint_table[i].tokens);
-      hint_table_lead_offset[(unsigned char) (hint_table[i].tokens[0])]++;
-    }
+	hint_table[i].is_hit = false;
+	hint_table[i].length = (int) strlen (hint_table[i].tokens);
+	hint_table_lead_offset[(unsigned char) (hint_table[i].tokens[0])]++;
+      }
 
-  // ordering by asc 
-  qsort (hint_table, i, sizeof (hint_table[0]), &hint_token_cmp);
+    // ordering by asc 
+    qsort (hint_table, i, sizeof (hint_table[0]), &hint_token_cmp);
 
-  // Cumulative Distribution Counting
-  int sum = 0;
-  int tCnt = hint_table_lead_offset[0];
-  for (i = 0; i < HINT_LEAD_CHAR_SIZE; i++)
-    {
-      tCnt = hint_table_lead_offset[i];
-      hint_table_lead_offset[i] = sum;
-      sum += tCnt;
-    }
+    // Cumulative Distribution Counting
+    int sum = 0;
+    int tCnt = hint_table_lead_offset[0];
+    for (i = 0; i < HINT_LEAD_CHAR_SIZE; i++)
+      {
+	tCnt = hint_table_lead_offset[i];
+	hint_table_lead_offset[i] = sum;
+	sum += tCnt;
+      }
 
-  // Copy for lower character
-  for (i = 'A'; i <= 'Z'; i++)
-    {
-      hint_table_lead_offset[i + 32 /*('a'-'A') */ ] = hint_table_lead_offset[i];
-    }
+    // Copy for lower character
+    for (i = 'A'; i <= 'Z'; i++)
+      {
+	hint_table_lead_offset[i + 32 /*('a'-'A') */ ] = hint_table_lead_offset[i];
+      }
 
-  was_initialized = 1;
+    return true;
+  }
+  (hint_table);
 }
 
 /*
@@ -754,7 +745,7 @@ pt_get_hint (const char *text, PT_HINT hint_table[], PT_NODE * node)
 	      node->info.query.q.select.hint = (PT_HINT_ENUM) (node->info.query.q.select.hint | hint_table[i].hint);
 	    }
 	  break;
-	case PT_HINT_NO_PARALLEL_HEAP_SCAN:
+	case PT_HINT_NO_PARALLEL_SCAN:
 	  if (node->node_type == PT_SELECT)
 	    {
 	      node->info.query.q.select.hint = (PT_HINT_ENUM) (node->info.query.q.select.hint | hint_table[i].hint);
@@ -835,6 +826,12 @@ pt_get_hint (const char *text, PT_HINT hint_table[], PT_NODE * node)
 		}
 	    }
 	  break;
+	case PT_HINT_DBLINK_NO_PUSH_DOWN_SUBQ:
+	  if (node->node_type == PT_SELECT)
+	    {
+	      node->info.query.q.select.hint = (PT_HINT_ENUM) (node->info.query.q.select.hint | hint_table[i].hint);
+	    }
+	  break;
 	case PT_HINT_NO_ELIMINATE_JOIN:
 	  if (node->node_type == PT_SELECT)
 	    {
@@ -872,7 +869,6 @@ pt_get_hint (const char *text, PT_HINT hint_table[], PT_NODE * node)
 	  break;
 	case PT_HINT_SELECT_RECORD_INFO:
 	case PT_HINT_SELECT_PAGE_INFO:
-	case PT_HINT_SAMPLING_SCAN:
 	  if (node->node_type == PT_SELECT)
 	    {
 	      node->info.query.q.select.hint = (PT_HINT_ENUM) (node->info.query.q.select.hint | hint_table[i].hint);
@@ -928,6 +924,25 @@ pt_get_hint (const char *text, PT_HINT hint_table[], PT_NODE * node)
 	  if (node->node_type == PT_SELECT)
 	    {
 	      node->info.query.q.select.hint = (PT_HINT_ENUM) (node->info.query.q.select.hint | hint_table[i].hint);
+	    }
+	  break;
+
+	case PT_HINT_BIND_SENSITIVE:
+	  /* query-level hint (pt_query_info.hint lives outside the q union), so it is read the same
+	   * way for every PT_IS_QUERY node the bind-sensitivity check runs on; UPDATE and DELETE
+	   * take part in the same first-execution peek / bucket-change replan, so they accept the
+	   * hint too */
+	  if (PT_IS_QUERY (node))
+	    {
+	      node->info.query.hint = (PT_HINT_ENUM) (node->info.query.hint | hint_table[i].hint);
+	    }
+	  else if (node->node_type == PT_UPDATE)
+	    {
+	      node->info.update.hint = (PT_HINT_ENUM) (node->info.update.hint | hint_table[i].hint);
+	    }
+	  else if (node->node_type == PT_DELETE)
+	    {
+	      node->info.delete_.hint = (PT_HINT_ENUM) (node->info.delete_.hint | hint_table[i].hint);
 	    }
 	  break;
 	default:

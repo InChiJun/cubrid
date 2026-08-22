@@ -26,7 +26,7 @@
 
 #include "system.h"		/* UINT32, UINT64 */
 #include "system_parameter.h"	/* sysprm_get_range, PRM_ID_PARALLELISM */
-#include "thread_worker_pool.hpp"	/* cubthread::system_core_count */
+#include "thread_manager.hpp"	/* cubthread::system_core_count */
 
 // XXX: SHOULD BE THE LAST INCLUDE HEADER
 #include "memory_wrapper.hpp"
@@ -39,7 +39,7 @@ namespace parallel_query
     static std::size_t system_core_count;
     static int parallelism;
 
-    static int heap_scan_page_threshold;
+    static int scan_page_threshold;
     static int hash_join_page_threshold;
     static int sort_page_threshold;
 
@@ -50,7 +50,7 @@ namespace parallel_query
       assert (parallelism >= 0);
       assert ((std::size_t) parallelism <= system_core_count);
 
-      heap_scan_page_threshold = prm_get_integer_value (PRM_ID_PARALLEL_HEAP_SCAN_PAGE_THRESHOLD);
+      scan_page_threshold = prm_get_integer_value (PRM_ID_PARALLEL_SCAN_PAGE_THRESHOLD);
       hash_join_page_threshold = prm_get_integer_value (PRM_ID_PARALLEL_HASH_JOIN_PAGE_THRESHOLD);
       sort_page_threshold = prm_get_integer_value (PRM_ID_PARALLEL_SORT_PAGE_THRESHOLD);
     });
@@ -58,9 +58,13 @@ namespace parallel_query
 
     UINT32 page_threshold;
     UINT32 auto_degree;
+    UINT32 degree;
     const UINT32 start_degree = 2;
 
-    if (system_core_count <= start_degree)
+    /* CBRD-27071: the no-logging index build must still reach degree 2 on a two-core host, so INDEX_BUILD is
+     * excluded from this gate; its own case below disables itself when the derived degree falls below
+     * start_degree. */
+    if (type != parallel_type::INDEX_BUILD && system_core_count <= start_degree)
       {
 	return 0;	/* disable */
       }
@@ -69,8 +73,8 @@ namespace parallel_query
 
     switch (type)
       {
-      case parallel_type::HEAP_SCAN:
-	page_threshold = (UINT32) heap_scan_page_threshold;
+      case parallel_type::SCAN:
+	page_threshold = (UINT32) scan_page_threshold;
 	break;
 
       case parallel_type::HASH_JOIN:
@@ -106,6 +110,19 @@ namespace parallel_query
 	    return 0;
 	  }
 	}	/* case parallel_type::SUBQUERY */
+
+      case parallel_type::INDEX_BUILD:
+	/* Only the no-logging index build (loaddb --no-logging-index) uses this type: it runs on a table that
+	 * loaddb owns, so it takes every core it can instead of following a page threshold and the parallelism
+	 * parameter (an ordinary CREATE INDEX keeps using parallel_type::SORT for that reason). Its degree is the
+	 * number of system cores (hyperthreads included), capped by the maximum supported parallelism and lowered
+	 * to the number of work units given in num_pages (data sectors of the scanned heap; each worker needs at
+	 * least one to produce a run). The hint is not used. */
+	assert (hint_degree == -1);
+	auto_degree = (UINT32) system_core_count;
+	auto_degree = MIN (auto_degree, (UINT32) PRM_MAX_PARALLELISM);
+	auto_degree = (UINT32) MIN ((UINT64) auto_degree, num_pages);
+	return (auto_degree < start_degree) ? 0 : auto_degree;
 
       default:
 	/* impossible case */
@@ -167,6 +184,9 @@ namespace parallel_query
 #endif
     // *INDENT-ON*
 
-    return MIN (auto_degree, (UINT32) parallelism);
+    degree = MIN (auto_degree, (UINT32) parallelism);
+
+    /* SCAN/HASH_JOIN/SORT use 0 for serial execution and require at least 2 for real parallelism. */
+    return (degree < start_degree) ? 0 : degree;
   }
 }				/* namespace parallel_query */

@@ -91,6 +91,7 @@ enum
   THREAD_TS_XCACHE,
   THREAD_TS_FPCACHE,
   THREAD_TS_DWB_SLOTS,
+  THREAD_TS_SERIAL_CACHE,
   THREAD_TS_LAST
 };
 #define THREAD_TS_COUNT  THREAD_TS_LAST
@@ -162,7 +163,8 @@ enum thread_resume_suspend_status
   THREAD_ALLOC_BCB_SUSPENDED = 21,
   THREAD_ALLOC_BCB_RESUMED = 22,
   THREAD_DWB_QUEUE_SUSPENDED = 23,
-  THREAD_DWB_QUEUE_RESUMED = 24
+  THREAD_DWB_QUEUE_RESUMED = 24,
+  THREAD_SLEEP_FUNC_SUSPENDED = 25
 };
 
 namespace cubthread
@@ -214,6 +216,11 @@ namespace cubthread
       // The rules of thumbs is to always use private members. Until a complete refactoring, these members will remain
       // public
       int index;			/* thread entry index */
+      int pgbuf_fix_req_cnt;	/* per-thread page-fix request count; pgbuf monitor shard (see page_buffer.c).
+				 * Lives in the thread entry (always cache-hot on the fix path) instead of a global
+				 * counter, whose separate cache line was reloaded on every page fix. Single-writer
+				 * (this thread); the periodic LRU-quota consumer sums across entries for a coarse ratio. */
+      int pgbuf_pg_unfix_cnt;	/* per-thread page-unfix count; pgbuf monitor shard (see above) */
       thread_type type;		/* thread type */
       thread_id_t emulate_tid;	/* emulated thread id; applies to non-worker threads, when works on behalf of a worker
 				   * thread */
@@ -308,10 +315,12 @@ namespace cubthread
       entry *m_px_orig_thread_entry;
       bool m_uses_px_stats;
 
-      bool m_skip_end_resource_tracks_in_recycle;
-
       bool m_is_private_lru_enabled;
       struct pgbuf_holder_anchor *m_holder_anchor;
+
+      /* UUIDv7 per-thread state for monotonic generation */
+      uint64_t uuidv7_last_ms;        /* last used millisecond timestamp */
+      uint8_t uuidv7_seq;            /* sequence counter within same millisecond (GUID_V7_SEQ_BITS : 8 bits) */
 
       thread_id_t get_id ();
       pthread_t get_posix_id ();
@@ -320,6 +329,8 @@ namespace cubthread
       bool is_on_current_thread () const;
 
       void return_lock_free_transaction_entries (void);
+
+      void release_packet (void *buffer);
 
       void lock (void);
       void unlock (void);
@@ -473,6 +484,42 @@ thread_set_sort_stats_active (cubthread::entry *thread_p, bool new_flag)
   return old_flag;
 }
 
+inline cubthread::entry *
+thread_get_main_thread (cubthread::entry *thread_p)
+{
+  assert (thread_p != nullptr);
+
+  cubthread::entry *current = thread_p;
+
+  // Safety limit to prevent infinite traversal in case of corrupted hierarchy
+  constexpr int MAX_DEPTH = 8;
+
+  for (int i = 0; i < MAX_DEPTH; ++i)
+    {
+      cubthread::entry *parent = current->m_px_orig_thread_entry;
+
+      // Found root (nullptr) or a self-referencing main thread
+      if (parent == nullptr || parent == current)
+	{
+
+	  return current;
+	}
+
+      // Detect logical cycles (looping back to the starting thread)
+      if ( unlikely (parent == thread_p))
+	{
+	  assert (false && "Cycle detected in thread hierarchy");
+	  return thread_p;
+	}
+
+      current = parent;
+    }
+
+  // Fallback for unexpectedly deep chains or undetected complex cycles
+  assert (false && "Thread hierarchy depth exceeded limit");
+  return thread_p;
+}
+
 inline void
 thread_lock_entry (cubthread::entry *thread_p)
 {
@@ -498,4 +545,22 @@ int thread_suspend_with_other_mutex (cubthread::entry *p, pthread_mutex_t *mutex
 const char *thread_type_to_string (thread_type type);
 const char *thread_status_to_string (cubthread::entry::status status);
 const char *thread_resume_status_to_string (thread_resume_suspend_status resume_status);
+
+/* UUIDv7 state accessors */
+inline void
+thread_get_uuidv7_state (cubthread::entry *thread_p, uint64_t *last_ms, uint8_t *seq)
+{
+  assert (thread_p != NULL);
+  *last_ms = thread_p->uuidv7_last_ms;
+  *seq = thread_p->uuidv7_seq;
+}
+
+inline void
+thread_set_uuidv7_state (cubthread::entry *thread_p, uint64_t last_ms, uint8_t seq)
+{
+  assert (thread_p != NULL);
+  thread_p->uuidv7_last_ms = last_ms;
+  thread_p->uuidv7_seq = seq;
+}
+
 #endif // _THREAD_ENTRY_HPP_

@@ -20,6 +20,7 @@
  * semantic_check.c - semantic checking functions
  */
 
+#include "parse_tree.h"
 #ident "$Id$"
 
 #include "config.h"
@@ -370,18 +371,8 @@ pt_update_compatible_info (PARSER_CONTEXT * parser, SEMAN_COMPATIBLE_INFO * cinf
 
       cinfo->type_enum = common_type;
 
-      cinfo->scale = MAX (att1_info->scale, att2_info->scale);
-      cinfo->prec = MAX ((att1_info->prec - att1_info->scale), (att2_info->prec - att2_info->scale)) + cinfo->scale;
-
-      if (cinfo->prec > DB_MAX_NUMERIC_PRECISION)
-	{			/* overflow */
-	  cinfo->scale -= (cinfo->prec - DB_MAX_NUMERIC_PRECISION);
-	  if (cinfo->scale < 0)
-	    {
-	      cinfo->scale = 0;
-	    }
-	  cinfo->prec = DB_MAX_NUMERIC_PRECISION;
-	}
+      cinfo->scale = DB_DEFAULT_NUMERIC_SCALE;
+      cinfo->prec = DB_DEFAULT_NUMERIC_PRECISION;
       break;
 
     case PT_TYPE_SET:
@@ -1346,7 +1337,7 @@ pt_check_cast_op (PARSER_CONTEXT * parser, PT_NODE * node)
 
 /*
  * pt_check_user_exists () -  given 'user.class', check that 'user' exists
- *   return:  db_user instance if user exists, NULL otherwise.
+ *   return:  _db_user instance if user exists, NULL otherwise.
  *   parser(in): the parser context used to derive cls_ref
  *   cls_ref(in): a PT_NAME node
  *
@@ -1380,7 +1371,7 @@ pt_check_user_exists (PARSER_CONTEXT * parser, PT_NODE * cls_ref)
 
 /*
  * pt_check_user_owns_class () - given user.class, check that user owns class
- *   return:  db_user instance if 'user' exists & owns 'class', NULL otherwise
+ *   return:  _db_user instance if 'user' exists & owns 'class', NULL otherwise
  *   parser(in): the parser context used to derive cls_ref
  *   cls_ref(in): a PT_NAME node
  */
@@ -1984,17 +1975,26 @@ pt_vclass_compatible (PARSER_CONTEXT * parser, const PT_NODE * att, const PT_NOD
     }
 
   /* return true iff att is a vclass & qcol is in att's query_spec list */
+  bool bret = false;
+  PARSER_CONTEXT *tmp_parser = parser_create_parser ();
+  if (tmp_parser == NULL)
+    {
+      return false;
+    }
+
   for (specs = db_get_query_specs (vcls); specs && (spec = db_query_spec_string (specs));
        specs = db_query_spec_next (specs))
     {
-      qs_clsnam = pt_get_proxy_spec_name (spec);
+      qs_clsnam = pt_get_proxy_spec_name (tmp_parser, spec);
       if (qs_clsnam && intl_identifier_casecmp (qs_clsnam, qcol_typnam) == 0)
 	{
-	  return true;		/* att is vclass_compatible with qcol */
+	  bret = true;		/* att is vclass_compatible with qcol */
+	  break;
 	}
     }
 
-  return false;			/* att is not vclass_compatible with qcol */
+  parser_free_parser (tmp_parser);
+  return bret;			/* att is not vclass_compatible with qcol */
 }
 
 /*
@@ -2266,20 +2266,8 @@ pt_union_compatible (PARSER_CONTEXT * parser, PT_NODE * item1, PT_NODE * item2, 
 	    {
 	      return PT_UNION_ERROR;
 	    }
-	  data_type->info.data_type.precision =
-	    MAX ((ci1.prec - ci1.scale), (ci2.prec - ci2.scale)) + MAX (ci1.scale, ci2.scale);
-	  data_type->info.data_type.dec_precision = MAX (ci1.scale, ci2.scale);
-
-	  if (data_type->info.data_type.precision > DB_MAX_NUMERIC_PRECISION)
-	    {
-	      data_type->info.data_type.dec_precision =
-		(DB_MAX_NUMERIC_PRECISION - data_type->info.data_type.dec_precision);
-	      if (data_type->info.data_type.dec_precision < 0)
-		{
-		  data_type->info.data_type.dec_precision = 0;
-		}
-	      data_type->info.data_type.precision = DB_MAX_NUMERIC_PRECISION;
-	    }
+	  data_type->info.data_type.precision = DB_DEFAULT_NUMERIC_PRECISION;
+	  data_type->info.data_type.dec_precision = DB_DEFAULT_NUMERIC_SCALE;
 	}
 
       if (item1->type_enum == common_type && item2->type_enum == common_type)
@@ -4317,6 +4305,8 @@ pt_find_default_expression (PARSER_CONTEXT * parser, PT_NODE * tree, void *arg, 
     case PT_USER:
     case PT_CURRENT_USER:
     case PT_UNIX_TIMESTAMP:
+    case PT_UUID:
+    case PT_SYS_GUID:
       *default_expr = tree;
       *continue_walk = PT_STOP_WALK;
       break;
@@ -4901,6 +4891,13 @@ pt_check_alter (PARSER_CONTEXT * parser, PT_NODE * alter)
 	      if (attr->info.attr_def.auto_increment != NULL)
 		{
 		  PT_ERRORm (parser, alter, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_VCLASS_ATT_CANT_BE_AUTOINC);
+		  return;
+		}
+	      if (attr->info.attr_def.attr_invisible != PT_ATTR_INVISIBLE_UNSET)
+		{
+		  /* attempt to set visibility in vclass */
+		  PT_ERRORm (parser, alter, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_VCLASS_ATT_CANT_SET_VISIBILITY);
+		  return;
 		}
 	    }
 	}
@@ -5666,17 +5663,6 @@ pt_find_partition_column_count (PT_NODE * expr, PT_NODE ** name_node)
     case PT_TO_TIMESTAMP_TZ:
     case PT_CONV_TZ:
       break;
-
-      /* PT_DRAND and PT_DRANDOM are not supported regardless of whether a seed is given or not. because they produce
-       * random numbers of DOUBLE type. DOUBLE type is not allowed on partition expression. */
-    case PT_RAND:
-    case PT_RANDOM:
-      if (expr->info.expr.arg1 == NULL)
-	{
-	  return -1;
-	}
-      break;
-
     default:
       return -1;		/* unsupported expression */
     }
@@ -7906,13 +7892,10 @@ pt_check_default_vclass_query_spec (PARSER_CONTEXT * parser, PT_NODE * qry, PT_N
   PT_NODE *attr, *col;
   PT_NODE *columns = pt_get_select_list (parser, qry);
   PT_NODE *default_data = NULL;
-  PT_NODE *default_value = NULL, *default_op_value = NULL;
+  PT_NODE *default_value = NULL;
   PT_NODE *spec, *entity_name;
   DB_OBJECT *obj;
   DB_ATTRIBUTE *col_attr;
-  const char *lang_str;
-  int flag = 0;
-  bool has_user_format;
 
   /* Import default value and on update default expr from referenced table
    * for those attributes in the the view that don't have them. */
@@ -7988,54 +7971,12 @@ pt_check_default_vclass_query_spec (PARSER_CONTEXT * parser, PT_NODE * qry, PT_N
 	    }
 	  else
 	    {
-	      default_op_value = parser_new_node (parser, PT_EXPR);
-	      if (default_op_value == NULL)
+	      default_value =
+		pt_make_default_value_tree_from_default_expr (parser, &col_attr->default_value.default_expr);
+	      if (default_value == NULL)
 		{
 		  PT_ERRORm (parser, qry, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_OUT_OF_MEMORY);
 		  goto error;
-		}
-
-	      default_op_value->info.expr.op =
-		pt_op_type_from_default_expr_type (col_attr->default_value.default_expr.default_expr_type);
-
-	      if (col_attr->default_value.default_expr.default_expr_op != T_TO_CHAR)
-		{
-		  default_value = default_op_value;
-		}
-	      else
-		{
-		  PT_NODE *arg1, *arg2, *arg3;
-
-		  arg1 = default_op_value;
-		  has_user_format = col_attr->default_value.default_expr.default_expr_format ? 1 : 0;
-		  arg2 = pt_make_string_value (parser, col_attr->default_value.default_expr.default_expr_format);
-		  if (arg2 == NULL)
-		    {
-		      parser_free_tree (parser, default_op_value);
-		      PT_ERRORm (parser, qry, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_OUT_OF_MEMORY);
-		      goto error;
-		    }
-
-		  arg3 = parser_new_node (parser, PT_VALUE);
-		  if (arg3 == NULL)
-		    {
-		      parser_free_tree (parser, default_op_value);
-		      parser_free_tree (parser, arg2);
-		    }
-		  arg3->type_enum = PT_TYPE_INTEGER;
-		  lang_str = prm_get_string_value (PRM_ID_INTL_DATE_LANG);
-		  lang_set_flag_from_lang (lang_str, has_user_format, 0, &flag);
-		  arg3->info.value.data_value.i = (long) flag;
-
-		  default_value = parser_make_expression (parser, PT_TO_CHAR, arg1, arg2, arg3);
-		  if (default_value == NULL)
-		    {
-		      parser_free_tree (parser, default_op_value);
-		      parser_free_tree (parser, arg2);
-		      parser_free_tree (parser, arg3);
-		      PT_ERRORm (parser, qry, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_OUT_OF_MEMORY);
-		      goto error;
-		    }
 		}
 
 	      default_data = parser_new_node (parser, PT_DATA_DEFAULT);
@@ -8735,6 +8676,12 @@ pt_check_create_entity (PARSER_CONTEXT * parser, PT_NODE * node)
 	      PT_ERRORm (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_VCLASS_ATT_CANT_BE_AUTOINC);
 	      return;
 	    }
+	  if (attr->info.attr_def.attr_invisible != PT_ATTR_INVISIBLE_UNSET)
+	    {
+	      /* attempt to set visibility in vclass */
+	      PT_ERRORm (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_VCLASS_ATT_CANT_SET_VISIBILITY);
+	      return;
+	    }
 	}
     }
 
@@ -9060,6 +9007,7 @@ pt_check_create_index (PARSER_CONTEXT * parser, PT_NODE * node)
   /* if this is a filter index, check that the filter is a valid filter expression. */
   pt_check_filter_index_expr (parser, node->info.index.column_names, node->info.index.where, db_obj);
 }
+
 
 static void
 pt_check_alter_synonym (PARSER_CONTEXT * parser, PT_NODE * node)
@@ -9793,6 +9741,7 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 {
   PT_NODE *temp;
   PT_NODE *name;
+  const char *entity_name;
   DB_OBJECT *db_obj;
   DB_ATTRIBUTE *attributes;
   PT_FLAT_SPEC_INFO info;
@@ -9808,13 +9757,12 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 
       while ((free_node != NULL) && (free_node->node_type == PT_SPEC))
 	{
-	  const char *cls_name;
 	  /* check if class name exists. if not, we remove the corresponding node from spec_list. */
 	  if ((name = free_node->info.spec.entity_name) != NULL && name->node_type == PT_NAME
-	      && (cls_name = name->info.name.original) != NULL)
+	      && (entity_name = name->info.name.original) != NULL)
 	    {
 	      /* We cannot change the schema of a class by using synonym names. */
-	      if (db_find_synonym (cls_name) == NULL)
+	      if (db_find_synonym (entity_name) == NULL)
 		{
 		  ASSERT_ERROR ();
 
@@ -9827,7 +9775,7 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 		      return;
 		    }
 
-		  if ((db_obj = db_find_class_with_purpose (cls_name, true)) != NULL)
+		  if ((db_obj = db_find_class_with_purpose (entity_name, true)) != NULL)
 		    {
 		      prev_node = free_node;
 		      free_node = free_node->next;
@@ -9905,7 +9853,6 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 
       while ((free_node != NULL) && (free_node->node_type == PT_SPEC))
 	{
-
 	  if ((name = free_node->info.spec.entity_name) == NULL)
 	    {
 	      if (free_node == node->info.drop.spec_list)
@@ -9928,29 +9875,19 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 	      free_node = free_node->next;
 	    }
 	}
-
     }
-
-  info.spec_parent = NULL;
-  info.for_update = true;
-  /* Replace each Entity Spec with an Equivalent flat list */
-  parser_walk_tree (parser, node, pt_flat_spec_pre, &info, pt_continue_walk, NULL);
-
-  if (node->info.drop.entity_type != PT_MISC_DUMMY || node->info.drop.is_cascade_constraints)
+  else
     {
-      const char *cls_nam;
-      PT_MISC_TYPE typ = node->info.drop.entity_type;
-
-      /* verify declared class type is correct */
       for (temp = node->info.drop.spec_list; temp && temp->node_type == PT_SPEC; temp = temp->next)
 	{
 	  if ((name = temp->info.spec.entity_name) != NULL && name->node_type == PT_NAME
-	      && (cls_nam = name->info.name.original) != NULL)
+	      && (entity_name = name->info.name.original) != NULL)
 	    {
 	      /* We cannot change the schema of a class by using synonym names. */
-	      if (db_find_synonym (cls_nam) != NULL)
+	      if (db_find_synonym (entity_name) != NULL)
 		{
-		  PT_ERRORmf (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_CLASS_DOES_NOT_EXIST, cls_nam);
+		  PT_ERRORmf (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_CLASS_DOES_NOT_EXIST,
+			      entity_name);
 		  return;
 		}
 	      else
@@ -9967,26 +9904,41 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
 		      return;
 		    }
 		}
+	    }
+	}
+    }
 
-	      if ((db_obj = db_find_class (cls_nam)) != NULL)
+  info.spec_parent = NULL;
+  info.for_update = true;
+  /* Replace each Entity Spec with an Equivalent flat list */
+  parser_walk_tree (parser, node, pt_flat_spec_pre, &info, pt_continue_walk, NULL);
+
+  if (node->info.drop.entity_type != PT_MISC_DUMMY || node->info.drop.is_cascade_constraints)
+    {
+      PT_MISC_TYPE typ = node->info.drop.entity_type;
+
+      /* verify declared class type is correct */
+      for (temp = node->info.drop.spec_list; temp && temp->node_type == PT_SPEC; temp = temp->next)
+	{
+	  if ((name = temp->info.spec.entity_name) != NULL && name->node_type == PT_NAME
+	      && (entity_name = name->info.name.original) != NULL && (db_obj = db_find_class (entity_name)) != NULL)
+	    {
+	      if (typ != PT_MISC_DUMMY)
 		{
-		  if (typ != PT_MISC_DUMMY)
+		  name->info.name.db_object = db_obj;
+		  pt_check_user_owns_class (parser, name);
+		  if ((typ == PT_CLASS && db_is_class (db_obj) <= 0)
+		      || (typ == PT_VCLASS && db_is_vclass (db_obj) <= 0))
 		    {
-		      name->info.name.db_object = db_obj;
-		      pt_check_user_owns_class (parser, name);
-		      if ((typ == PT_CLASS && db_is_class (db_obj) <= 0)
-			  || (typ == PT_VCLASS && db_is_vclass (db_obj) <= 0))
-			{
-			  PT_ERRORmf2 (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_IS_NOT_A, cls_nam,
-				       pt_show_misc_type (typ));
-			}
+		      PT_ERRORmf2 (parser, node, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_IS_NOT_A, entity_name,
+				   pt_show_misc_type (typ));
 		    }
+		}
 
-		  if (node->info.drop.is_cascade_constraints && db_is_vclass (db_obj) > 0)
-		    {
-		      PT_ERRORmf (parser, node, MSGCAT_SET_PARSER_SEMANTIC,
-				  MSGCAT_SEMANTIC_VIEW_CASCADE_CONSTRAINTS_NOT_ALLOWED, cls_nam);
-		    }
+	      if (node->info.drop.is_cascade_constraints && db_is_vclass (db_obj) > 0)
+		{
+		  PT_ERRORmf (parser, node, MSGCAT_SET_PARSER_SEMANTIC,
+			      MSGCAT_SEMANTIC_VIEW_CASCADE_CONSTRAINTS_NOT_ALLOWED, entity_name);
 		}
 	    }
 	}
@@ -9996,10 +9948,8 @@ pt_check_drop (PARSER_CONTEXT * parser, PT_NODE * node)
    * for the attr */
   for (temp = node->info.drop.spec_list; temp && temp->node_type == PT_SPEC; temp = temp->next)
     {
-      const char *cls_nam;
-
       if ((name = temp->info.spec.entity_name) != NULL && name->node_type == PT_NAME
-	  && (cls_nam = name->info.name.original) != NULL && (db_obj = db_find_class (cls_nam)) != NULL)
+	  && (entity_name = name->info.name.original) != NULL && (db_obj = db_find_class (entity_name)) != NULL)
 	{
 	  attributes = db_get_attributes_force (db_obj);
 	  while (attributes)
@@ -10089,7 +10039,7 @@ pt_check_grant_revoke (PARSER_CONTEXT * parser, PT_NODE * node)
 	  const char *proc_name = procs->info.name.original;
 	  if (jsp_is_exist_stored_procedure (proc_name) == false)
 	    {
-	      PT_ERRORmf (parser, procs, MSGCAT_SET_PARSER_SEMANTIC, MSTCAT_SEMANTIC_SP_NOT_EXIST, proc_name);
+	      PT_ERRORmf (parser, procs, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SP_NOT_EXIST, proc_name);
 	      break;
 	    }
 	}
@@ -10657,15 +10607,45 @@ static void
 pt_check_into_clause_for_static_sql (PARSER_CONTEXT * parser, PT_NODE * qry, int into_cnt)
 {
   // set external into labels in parser context
+  int i = 0;
+  int is_fail = 1;
   PT_NODE *into = qry->info.query.into_list;
 
   char **external_into_label = (char **) malloc (into_cnt * sizeof (char *));
-  for (int i = 0; i < into_cnt; i++)
+  if (external_into_label == NULL)
     {
-      external_into_label[i] = (char *) malloc (sizeof (char) * 255);
-      strncpy (external_into_label[i], into->info.name.original, 254);
+      goto error_exit;
+    }
+
+  for (i = 0; i < into_cnt; i++)
+    {
+      external_into_label[i] = strdup (into->info.name.original);
+      if (external_into_label[i] == NULL)
+	{
+	  goto error_exit;
+	}
       into = into->next;
     }
+  is_fail = 0;
+
+error_exit:
+  if (is_fail == 1)
+    {
+      // clear memory
+      if (external_into_label)
+	{
+	  for (--i; i >= 0; i--)
+	    {
+	      free (external_into_label[i]);
+	    }
+	  free (external_into_label);
+	  external_into_label = NULL;
+	}
+
+      PT_ERRORm (parser, qry, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_OUT_OF_MEMORY);
+      into_cnt = 0;
+    }
+
   parser->external_into_label_cnt = into_cnt;
   parser->external_into_label = external_into_label;
 
@@ -12049,6 +12029,175 @@ pt_check_with_clause (PARSER_CONTEXT * parser, PT_NODE * node)
 }
 
 /*
+ * pt_dblink_delete_subq_shadows_name () - true if subq's OWN top-level FROM rebinds name (as a range
+ *   variable, or as a bare entity name when the spec has no alias).
+ *   Only a plain SELECT has a single top-level FROM to check; UNION/INTERSECTION/DIFFERENCE and CTEs are
+ *   conservatively treated as not shadowing (same as before this check existed), since a query's operands
+ *   would each need this evaluated in their own right. Checks subq's own scope only -- a further-nested
+ *   PT_SELECT (a derived table in this FROM, or any other nested subquery) may shadow the name again on
+ *   its own terms, independently of this result; the caller (pt_dblink_delete_corr_ref_pre) re-evaluates
+ *   this per scope as it descends, rather than relying on a single top-level call.
+ */
+static bool
+pt_dblink_delete_subq_shadows_name (PT_NODE * subq, const char *name)
+{
+  PT_NODE *spec;
+
+  if (name == NULL || subq == NULL || subq->node_type != PT_SELECT)
+    {
+      return false;
+    }
+
+  for (spec = subq->info.query.q.select.from; spec != NULL; spec = spec->next)
+    {
+      const char *spec_name = (spec->info.spec.range_var != NULL)
+	? spec->info.spec.range_var->info.name.original
+	: ((spec->info.spec.entity_name != NULL) ? spec->info.spec.entity_name->info.name.original : NULL);
+
+      if (spec_name != NULL && intl_identifier_casecmp (spec_name, name) == 0)
+	{
+	  return true;
+	}
+    }
+
+  return false;
+}
+
+/*
+ * pt_dblink_delete_corr_ref_pre/_post () - walk callback pair: flag a subquery correlated to the outer
+ *   remote DELETE target. A correlated reference is a qualified column (PT_DOT_) whose qualifier matches
+ *   the target's range variable or entity name. Used by pt_check_with_info's DELETE branch before the
+ *   subquery is bound stand-alone (which would otherwise fail with a confusing "Attribute <alias> was not
+ *   found").
+ *   Shadowing is re-evaluated at every PT_SELECT boundary the walk descends into (subq itself, a derived
+ *   table, or any other nested subquery) via the scope stack the pre/post pair pushes/pops -- not just
+ *   subq's own top-level FROM -- so a derived table that rebinds the name deeper in the tree is also
+ *   recognized. A scope inherits its enclosing scope's shadow state (once shadowed, always shadowed
+ *   going deeper -- see pt_dblink_delete_subq_shadows_name).
+ */
+typedef struct pt_dblink_del_corr_scope
+{
+  struct pt_dblink_del_corr_scope *up;
+  bool alias_shadowed;		/* true if this scope's own top-level FROM (or an enclosing one) rebinds `alias` */
+  bool entity_shadowed;		/* true if this scope's own top-level FROM (or an enclosing one) rebinds `entity` */
+} PT_DBLINK_DEL_CORR_SCOPE;
+
+typedef struct
+{
+  const char *alias;		/* outer target range variable (e.g. "r" in remote_t AS r), may be NULL */
+  const char *entity;		/* outer target table name (e.g. "remote_t"), may be NULL */
+  PT_DBLINK_DEL_CORR_SCOPE *top;	/* innermost pushed scope; NULL before subq's own PT_SELECT is entered */
+  bool found;
+} PT_DBLINK_DEL_CORR;
+
+static PT_NODE *
+pt_dblink_delete_corr_ref_pre (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk)
+{
+  PT_DBLINK_DEL_CORR *chk = (PT_DBLINK_DEL_CORR *) arg;
+
+  *continue_walk = PT_CONTINUE_WALK;
+  if (node->node_type == PT_SELECT)
+    {
+      PT_DBLINK_DEL_CORR_SCOPE *scope = (PT_DBLINK_DEL_CORR_SCOPE *) parser_alloc (parser, sizeof (*scope));
+      bool up_alias_shadowed = (chk->top != NULL) && chk->top->alias_shadowed;
+      bool up_entity_shadowed = (chk->top != NULL) && chk->top->entity_shadowed;
+
+      scope->up = chk->top;
+      scope->alias_shadowed = up_alias_shadowed || pt_dblink_delete_subq_shadows_name (node, chk->alias);
+      scope->entity_shadowed = up_entity_shadowed || pt_dblink_delete_subq_shadows_name (node, chk->entity);
+      chk->top = scope;
+    }
+  else if (node->node_type == PT_DOT_ && node->info.dot.arg1 != NULL && node->info.dot.arg1->node_type == PT_NAME)
+    {
+      const char *q = node->info.dot.arg1->info.name.original;
+      bool alias_shadowed = (chk->top != NULL) && chk->top->alias_shadowed;
+      bool entity_shadowed = (chk->top != NULL) && chk->top->entity_shadowed;
+
+      if (q != NULL
+	  && ((chk->alias != NULL && !alias_shadowed && intl_identifier_casecmp (q, chk->alias) == 0)
+	      || (chk->entity != NULL && !entity_shadowed && intl_identifier_casecmp (q, chk->entity) == 0)))
+	{
+	  chk->found = true;
+	  *continue_walk = PT_STOP_WALK;
+	}
+    }
+  return node;
+}
+
+static PT_NODE *
+pt_dblink_delete_corr_ref_post (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk)
+{
+  PT_DBLINK_DEL_CORR *chk = (PT_DBLINK_DEL_CORR *) arg;
+
+  (void) parser;
+
+  *continue_walk = PT_CONTINUE_WALK;
+  if (node->node_type == PT_SELECT && chk->top != NULL)
+    {
+      chk->top = chk->top->up;
+    }
+  return node;
+}
+
+/*
+ * pt_bind_remote_dml_subq () - Bind a local subquery that a remote DML sink (INSERT SELECT / DELETE
+ *   local-subquery) evaluates stand-alone: run the same steps a top-level SELECT receives
+ *   (pt_resolve_names -> pt_check_where -> pt_mark_union_leaf_nodes -> pt_semantic_check_local ->
+ *   mq_translate), since the remote DML path breaks out of the normal query semantic check before this
+ *   subquery would otherwise be processed as one. Without this, WHERE / GROUP BY / HAVING / ORDER BY /
+ *   LIMIT / expressions / aggregates / UNION on the subquery are never handled (e.g. ORDER BY raises a
+ *   "generate order_by" system error, LIMIT is ignored).
+ *   return: the translated subquery, or NULL on failure (parser error already set)
+ *   parser(in)         : parser context
+ *   subq(in)            : the local subquery to bind (SELECT for INSERT; WHERE right-hand side for DELETE)
+ *   sc_info_ptr(in/out) : semantic check info; top_node is set to subq for the duration, then restored
+ *   fail_msg(in)        : PT_INTERNAL_ERROR message if mq_translate returns NULL without setting an error
+ *                         (its contract, like the canonical db_vdb.c caller, treats that as a failure too)
+ */
+static PT_NODE *
+pt_bind_remote_dml_subq (PARSER_CONTEXT * parser, PT_NODE * subq, SEMANTIC_CHK_INFO * sc_info_ptr, const char *fail_msg)
+{
+  PT_NODE *saved_top = sc_info_ptr->top_node;
+
+  pt_resolve_names (parser, subq, sc_info_ptr);
+  if (pt_has_error (parser))
+    {
+      return NULL;
+    }
+
+  sc_info_ptr->top_node = subq;
+  subq = pt_check_where (parser, subq);
+  if (subq != NULL && !pt_has_error (parser))
+    {
+      subq = parser_walk_tree (parser, subq, pt_mark_union_leaf_nodes, NULL, pt_continue_walk, NULL);
+    }
+  if (subq != NULL && !pt_has_error (parser))
+    {
+      subq = parser_walk_tree (parser, subq, NULL, NULL, pt_semantic_check_local, sc_info_ptr);
+    }
+  if (subq != NULL && !pt_has_error (parser))
+    {
+      /* The remote DML path skips the statement-level mq_translate (db_vdb.c, the whole statement is
+       * sent to the remote server). The local subquery runs stand-alone here, so translate it: this
+       * applies view expansion, dblink derived-table rewrite and set-operator operand marking
+       * (PT_IS_UNION_SUBQUERY) from the canonical code, so the operand/derived XASLs are gathered into
+       * aptr_list and executed. Runs after the local semantic check above, matching the normal
+       * semantic-check -> mq_translate order. */
+      subq = mq_translate (parser, subq);
+      if (subq == NULL && !pt_has_error (parser))
+	{
+	  /* Match the canonical mq_translate contract (db_vdb.c): a NULL result is a failure even when
+	   * no error was recorded. Without this the stale subquery would reach XASL generation. */
+	  PT_INTERNAL_ERROR (parser, fail_msg);
+	}
+    }
+
+  sc_info_ptr->top_node = saved_top;
+
+  return pt_has_error (parser) ? NULL : subq;
+}
+
+/*
  * pt_check_with_info () -  do name resolution & semantic checks on this tree
  *   return:  statement if no errors, NULL otherwise
  *   parser(in): the parser context
@@ -12140,6 +12289,7 @@ pt_check_with_info (PARSER_CONTEXT * parser, PT_NODE * node, SEMANTIC_CHK_INFO *
 	}
 #endif /* 0 */
 
+      sc_info_ptr->system_class = false;
       if (!pt_has_error (parser))
 	{
 	  if ((node->node_type == PT_INSERT && node->info.insert.spec->info.spec.remote_server_name)
@@ -12147,11 +12297,113 @@ pt_check_with_info (PARSER_CONTEXT * parser, PT_NODE * node, SEMANTIC_CHK_INFO *
 	      || (node->node_type == PT_UPDATE && node->info.update.spec->info.spec.remote_server_name)
 	      || (node->node_type == PT_MERGE && node->info.merge.into->info.spec.remote_server_name))
 	    {
+	      /* For a remote INSERT SELECT in the sink form (local SELECT streamed to the remote
+	       * target; see the qstr gate below) the SELECT subquery runs locally, but the remote DML path
+	       * breaks out of the normal query semantic check below, so the subquery is never processed
+	       * as a stand-alone query. Run the same steps a top-level SELECT receives
+	       * (pt_resolve_names -> pt_check_where -> pt_mark_union_leaf_nodes -> pt_semantic_check_local)
+	       * so its WHERE / GROUP BY / HAVING / ORDER BY / LIMIT / expressions / aggregates / UNION are
+	       * handled; otherwise ORDER BY raises a "generate order_by" system error, LIMIT is ignored, etc. */
+	      /* Sink form only (DML text not serialized, qstr == NULL): the SELECT subquery runs
+	       * locally, so it needs the local semantic pass below. The full-pushdown form
+	       * (qstr set) ships the whole statement to the remote server, where it is parsed
+	       * and type-checked; the local pass would fail on remote columns whose types are
+	       * unknown locally. */
+	      if (node->node_type == PT_INSERT
+		  && node->info.insert.spec->info.spec.remote_server_name->node_type == PT_DBLINK_TABLE_DML
+		  && node->info.insert.spec->info.spec.remote_server_name->info.dblink_table.qstr == NULL)
+		{
+		  PT_NODE *subq = pt_get_subquery_of_insert_select (node);
+		  if (subq != NULL)
+		    {
+		      subq = pt_bind_remote_dml_subq (parser, subq, sc_info_ptr,
+						      "remote INSERT SELECT: failed to translate the SELECT subquery");
+		      if (subq != NULL)
+			{
+			  node->info.insert.value_clauses->info.node_list.list = subq;
+
+			  /* The remote path also skips the INSERT-level attribute/value count check, so an
+			   * explicit column list whose size differs from the SELECT projection would reach
+			   * XASL generation and abort there. Validate it here with the same semantic error a
+			   * local INSERT uses. */
+			  if (node->info.insert.attr_list != NULL)
+			    {
+			      int ac = pt_length_of_list (node->info.insert.attr_list);
+			      int cc = pt_length_of_select_list (pt_get_select_list (parser, subq),
+								 EXCLUDE_HIDDEN_COLUMNS);
+			      if (ac != cc)
+				{
+				  PT_ERRORmf2 (parser, node, MSGCAT_SET_PARSER_SEMANTIC,
+					       MSGCAT_SEMANTIC_ATT_CNT_COL_CNT_NE, ac, cc);
+				}
+			    }
+			}
+		    }
+		}
+	      else if (node->node_type == PT_DELETE)
+		{
+		  /* mirrors the remote INSERT SELECT handling above (same reason -- see that comment); here
+		   * the WHERE subquery's specs would lack range_var / spec id and XASL generation would
+		   * crash. Only the single-predicate "<col> <op> (subquery)" shape is touched; other remote
+		   * DELETEs have no subquery (or a value list) and use the qstr pushdown. */
+		  PT_NODE *remote = node->info.delete_.spec->info.spec.remote_server_name;
+		  PT_NODE *cond = node->info.delete_.search_cond;
+		  PT_NODE *subq = NULL;
+
+		  /* Only the value-push sink. pt_rewrite_for_dblink (db_vdb.c, before this semantic check) already
+		   * converted the target to PT_DBLINK_TABLE_DML: the sink leaves qstr == NULL, while a full qstr
+		   * pushdown (e.g. same-server all-remote IN (SELECT ... FROM t@srv)) sets qstr and ships the whole
+		   * DELETE as text -- its subquery must NOT be translated locally. qstr == NULL is only produced when
+		   * the parser shape gate (pt_dblink_delete_where_is_inscope) accepted the form, so this also confines
+		   * resolution to the parser-approved single-predicate shapes. */
+		  if (remote != NULL && remote->node_type == PT_DBLINK_TABLE_DML
+		      && remote->info.dblink_table.qstr == NULL && cond != NULL && cond->next == NULL
+		      && cond->node_type == PT_EXPR && cond->info.expr.arg2 != NULL
+		      && PT_IS_QUERY (cond->info.expr.arg2))
+		    {
+		      subq = cond->info.expr.arg2;
+		    }
+		  if (subq != NULL)
+		    {
+		      PT_NODE *tgt = node->info.delete_.spec;
+		      PT_DBLINK_DEL_CORR corr;
+
+		      /* reject a subquery correlated to the outer DELETE target with a clear message, before the
+		       * stand-alone bind below (which would fail with "Attribute <alias> was not found"). The
+		       * value-push sink evaluates the subquery once with no outer row, so correlation is out of
+		       * scope (extension). */
+		      corr.alias =
+			(tgt->info.spec.range_var != NULL) ? tgt->info.spec.range_var->info.name.original : NULL;
+		      corr.entity =
+			(tgt->info.spec.entity_name != NULL) ? tgt->info.spec.entity_name->info.name.original : NULL;
+		      /* an inner FROM item that reuses the outer alias/table name for its OWN range shadows it --
+		       * any qualifier by that name inside that FROM item's scope then refers to the inner item,
+		       * not the outer target. Shadowing is (re-)computed per scope by the pre/post pair itself. */
+		      corr.top = NULL;
+		      corr.found = false;
+		      parser_walk_tree (parser, subq, pt_dblink_delete_corr_ref_pre, &corr,
+					pt_dblink_delete_corr_ref_post, &corr);
+		      if (corr.found)
+			{
+			  PT_ERROR (parser, node,
+				    "dblink: correlated subquery is not supported in a remote DELETE WHERE clause");
+			  subq = NULL;
+			}
+		    }
+		  if (subq != NULL)
+		    {
+		      subq = pt_bind_remote_dml_subq (parser, subq, sc_info_ptr,
+						      "remote DELETE: failed to translate the WHERE subquery");
+		      if (subq != NULL)
+			{
+			  cond->info.expr.arg2 = subq;
+			}
+		    }
+		}
 	      break;
 	    }
 	}
 
-      sc_info_ptr->system_class = false;
       node = pt_resolve_names (parser, node, sc_info_ptr);
 
       if (!pt_has_error (parser))
@@ -14494,6 +14746,12 @@ pt_check_group_by (PARSER_CONTEXT * parser, PT_NODE * node)
       };
       parser_walk_tree (parser, node->info.query.q.select.list, pt_expr_disallow_op_except_agg, disallow_ops,
 			NULL, NULL);
+
+      if (node->info.query.order_by != NULL)
+	{
+	  parser_walk_tree (parser, node->info.query.order_by, pt_expr_disallow_op_except_agg, disallow_ops,
+			    NULL, NULL);
+	}
     }
 
   return error;

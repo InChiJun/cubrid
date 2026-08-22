@@ -69,7 +69,14 @@ struct setobj;
 #define OR_CHECK_UNS_SUB_UNDERFLOW(a, b, c) \
   (b) > (a)
 #define OR_CHECK_MULT_OVERFLOW(a, b, c) \
-  (((b) == 0) ? ((c) != 0) : ((c) / (b) != (a)))
+  (((b) == 0) ? ((c) != 0) \
+   : (((b) == -1) ? ((a) != 0 && (c) == (a)) : ((c) / (b) != (a))))
+#if defined (__GNUC__) || defined (__clang__)
+#define OR_MULT_OVERFLOW(a, b, r) __builtin_mul_overflow ((a), (b), (r))
+#else
+#define OR_MULT_OVERFLOW(a, b, r) \
+  (*(r) = (a) * (b), OR_CHECK_MULT_OVERFLOW ((a), (b), *(r)))
+#endif
 #define OR_CHECK_SHORT_DIV_OVERFLOW(a, b) \
   ((a) == DB_INT16_MIN && (b) == -1)
 #define OR_CHECK_INT_DIV_OVERFLOW(a, b) \
@@ -1052,6 +1059,7 @@ extern "C"
   extern int db_enum_put_cs_and_collation (DB_VALUE * value, const int codeset, const int collation_id);
 
   extern int valcnv_convert_value_to_string (DB_VALUE * value);
+  extern int valcnv_convert_collection_value_to_string_all_elements (DB_VALUE * value);
 
 #if defined __cplusplus
 }
@@ -1108,11 +1116,11 @@ extern char *or_pack_listid (char *ptr, void *listid);
 extern char *or_pack_lock (char *ptr, LOCK lock);
 extern char *or_pack_set_header (char *buf, DB_TYPE stype, DB_TYPE etype, int bound_bits, int size);
 extern char *or_pack_set_node (char *ptr, void *set_node);
+extern char *or_pack_int_array (char *buffer, int count, const int *int_array);
 #if defined(ENABLE_UNUSED_FUNCTION)
 extern char *or_pack_elo (char *ptr, void *elo);
 extern char *or_pack_string_array (char *buffer, int count, const char **string_array);
 extern char *or_pack_db_value_array (char *buffer, int count, DB_VALUE * val);
-extern char *or_pack_int_array (char *buffer, int count, int *int_array);
 #endif
 
 /* should be using the or_pack_value family instead ! */

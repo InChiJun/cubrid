@@ -43,9 +43,9 @@
 #include <sys/stat.h>
 
 #include "authenticate.h"
-#include "connection_cl.h"
-#include "connection_list_cl.h"
+#include "client_support.h"
 #include "cubrid_log.h"
+#include "error_code.h"
 #include "log_lsa.hpp"
 #include "network.h"
 #include "object_representation.h"
@@ -505,6 +505,8 @@ cubrid_log_set_all_in_cond (int retrieve_all)
 int
 cubrid_log_set_extraction_table (uint64_t * classoid_arr, int arr_size)
 {
+  uint64_t *new_extraction_table = NULL;
+
   if (g_stage != CUBRID_LOG_STAGE_CONFIGURATION)
     {
       return CUBRID_LOG_INVALID_FUNC_CALL_STAGE;
@@ -515,13 +517,19 @@ cubrid_log_set_extraction_table (uint64_t * classoid_arr, int arr_size)
       return CUBRID_LOG_INVALID_CLASSOID_ARR_SIZE;
     }
 
-  g_extraction_table = (uint64_t *) malloc (sizeof (uint64_t) * arr_size);
-  if (g_extraction_table == NULL)
+  if (arr_size > 0)
     {
-      return CUBRID_LOG_FAILED_MALLOC;
+      new_extraction_table = (uint64_t *) malloc (sizeof (uint64_t) * arr_size);
+      if (new_extraction_table == NULL)
+	{
+	  return CUBRID_LOG_FAILED_MALLOC;
+	}
+
+      memcpy (new_extraction_table, classoid_arr, arr_size * sizeof (uint64_t));
     }
 
-  memcpy (g_extraction_table, classoid_arr, arr_size * sizeof (uint64_t));
+  free_and_init (g_extraction_table);
+  g_extraction_table = new_extraction_table;
   g_extraction_table_count = arr_size;
 
   return CUBRID_LOG_SUCCESS;
@@ -536,7 +544,8 @@ cubrid_log_set_extraction_table (uint64_t * classoid_arr, int arr_size)
 int
 cubrid_log_set_extraction_user (char **user_arr, int arr_size)
 {
-  int i;
+  int i, j;
+  char **new_extraction_user = NULL;
 
   if (g_stage != CUBRID_LOG_STAGE_CONFIGURATION)
     {
@@ -548,17 +557,47 @@ cubrid_log_set_extraction_user (char **user_arr, int arr_size)
       return CUBRID_LOG_INVALID_USER_ARR_SIZE;
     }
 
-  g_extraction_user = (char **) malloc (sizeof (char *) * arr_size);
-  if (g_extraction_user == NULL)
-    {
-      return CUBRID_LOG_FAILED_MALLOC;
-    }
-
   for (i = 0; i < arr_size; i++)
     {
-      g_extraction_user[i] = strdup (user_arr[i]);
+      if (user_arr[i] == NULL)
+	{
+	  return CUBRID_LOG_INVALID_USER;
+	}
     }
 
+  if (arr_size > 0)
+    {
+      new_extraction_user = (char **) malloc (sizeof (char *) * arr_size);
+      if (new_extraction_user == NULL)
+	{
+	  return CUBRID_LOG_FAILED_MALLOC;
+	}
+
+      for (i = 0; i < arr_size; i++)
+	{
+	  new_extraction_user[i] = strdup (user_arr[i]);
+	  if (new_extraction_user[i] == NULL)
+	    {
+	      for (j = 0; j < i; j++)
+		{
+		  free_and_init (new_extraction_user[j]);
+		}
+	      free_and_init (new_extraction_user);
+	      return CUBRID_LOG_FAILED_MALLOC;
+	    }
+	}
+    }
+
+  if (g_extraction_user != NULL)
+    {
+      for (i = 0; i < g_extraction_user_count; i++)
+	{
+	  free_and_init (g_extraction_user[i]);
+	}
+      free_and_init (g_extraction_user);
+    }
+
+  g_extraction_user = new_extraction_user;
   g_extraction_user_count = arr_size;
 
   return CUBRID_LOG_SUCCESS;
@@ -584,22 +623,21 @@ cubrid_log_connect_server_internal (char *host, int port, char *dbname)
     }
 #endif
 
-  g_conn_entry = css_make_conn (INVALID_SOCKET);
+  g_conn_entry = __gv_cvar.css_make_conn (INVALID_SOCKET);
   if (g_conn_entry == NULL)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT, "Failed to make css_conn_entry to connect to the server\n");
     }
 
-  if (css_common_connect
-      (host, g_conn_entry, DATA_REQUEST, dbname, (int) strlen (dbname) + 1, port, g_connection_timeout, &rid,
-       true) == NULL)
+  if (__gv_cvar.css_connect_to_log_server (host, g_conn_entry, dbname, port, g_connection_timeout, &rid) == NULL)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "Failed to connect to the server. host (%s), dbname (%s), port (%d), timeout (%d sec)\n",
 				 host, dbname, port, g_connection_timeout);
     }
 
-  if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) != NO_ERRORS)
+  if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) !=
+      NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT, "Failed to receive data from server. (timeout : %d sec)\n",
 				 g_connection_timeout);
@@ -619,7 +657,8 @@ cubrid_log_connect_server_internal (char *host, int port, char *dbname)
 #if defined (WINDOWS)
   if (reason == SERVER_CONNECTED_NEW)
     {
-      if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) != NO_ERRORS)
+      if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) !=
+	  NO_ERRORS)
 	{
 	  CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				     "Failed to receive the server port id from the master.\n");
@@ -631,9 +670,10 @@ cubrid_log_connect_server_internal (char *host, int port, char *dbname)
 
 	  int port_id = ntohl (*((int *) recv_data));
 
-	  css_close_conn (g_conn_entry);
+	  __gv_cvar.css_close_conn (g_conn_entry);
 
-	  g_conn_entry = css_server_connect_part_two (host, g_conn_entry, port_id, &rid);
+	  g_conn_entry = __gv_cvar.css_server_connect_part_two (host, g_conn_entry, port_id, &rid,
+								DB_CLIENT_TYPE_UNKNOWN);
 	  if (g_conn_entry == NULL)
 	    {
 	      CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
@@ -671,14 +711,9 @@ cubrid_log_error:
 
   if (g_conn_entry != NULL)
     {
-      queue_entry = css_find_queue_entry (g_conn_entry->buffer_queue, rid);
-      if (queue_entry != NULL)
-	{
-	  queue_entry->buffer = NULL;
-	  css_queue_remove_header_entry_ptr (&g_conn_entry->buffer_queue, queue_entry);
-	}
+      __gv_cvar.css_queue_find_and_remove_header_entry_ptr (g_conn_entry, rid);
 
-      css_free_conn (g_conn_entry);
+      __gv_cvar.css_free_conn (g_conn_entry);
       g_conn_entry = NULL;
     }
 
@@ -744,7 +779,7 @@ cubrid_log_send_configurations (void)
 
   request_size = (int) (ptr - request);
 
-  if (css_send_request_with_data_buffer
+  if (__gv_cvar.css_send_request_with_data_buffer_with_padding
       (g_conn_entry, NET_SERVER_CDC_START_SESSION, &rid, request, request_size, reply, reply_size) != NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
@@ -752,7 +787,8 @@ cubrid_log_send_configurations (void)
 				 request_size, reply_size);
     }
 
-  if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) != NO_ERRORS)
+  if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_connection_timeout * 1000) !=
+      NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "receive data from the request(NET_SERVER_CDC_START_SESSION) failed. (timeout : %d sec)\n",
@@ -789,12 +825,7 @@ cubrid_log_error:
       free_and_init (recv_data);
     }
 
-  queue_entry = css_find_queue_entry (g_conn_entry->buffer_queue, rid);
-  if (queue_entry != NULL)
-    {
-      queue_entry->buffer = NULL;
-      css_queue_remove_header_entry_ptr (&g_conn_entry->buffer_queue, queue_entry);
-    }
+  __gv_cvar.css_queue_find_and_remove_header_entry_ptr (g_conn_entry, rid);
 
   if (a_request != NULL)
     {
@@ -804,11 +835,44 @@ cubrid_log_error:
   return err_code;
 }
 
+/* er_errid () is overwritten with ER_BO_CONNECT_FAILED at the end of every connect failure path
+ * (boot_client_initialize_css), so the cause of a db_restart () failure must be taken from its
+ * return value. The CUBRID_LOG_FAILED_CONNECT set mirrors the codes that boot_client_initialize_css
+ * classifies as connect errors. Unmapped errors keep CUBRID_LOG_FAILED_LOGIN so that authentication
+ * failures (e.g. ER_AU_INVALID_PASSWORD) are reported as before. */
+static int
+cubrid_log_map_connect_error (int error)
+{
+  switch (error)
+    {
+    case ERR_CSS_TCP_HOST_NAME_ERROR:
+      return CUBRID_LOG_INVALID_HOST;
+    case ER_BO_UNKNOWN_DATABASE:
+      return CUBRID_LOG_INVALID_DBNAME;
+    case ER_NET_SERVER_HAND_SHAKE:
+    case ER_NET_HS_UNKNOWN_SERVER_REL:
+    case ER_NET_DIFFERENT_RELEASE:
+    case ER_NET_NO_SERVER_HOST:
+    case ER_NET_CANT_CONNECT_SERVER:
+    case ER_NET_NO_MASTER:
+    case ER_NET_SERVER_CRASHED:
+    case ER_BO_CONNECT_FAILED:
+    case ERR_CSS_TCP_CANNOT_CONNECT_TO_MASTER:
+    case ERR_CSS_TCP_CONNECT_TIMEDOUT:
+    case ERR_CSS_ERROR_FROM_SERVER:
+    case ER_CSS_CLIENTS_EXCEEDED:
+      return CUBRID_LOG_FAILED_CONNECT;
+    default:
+      return CUBRID_LOG_FAILED_LOGIN;
+    }
+}
+
 static int
 cubrid_log_db_login (char *hostname, char *dbname, char *username, char *password)
 {
   MOP user;
   char dbname_at_hostname[CUB_MAXHOSTNAMELEN + CUBRID_LOG_MAX_DBNAME_LEN + 2] = { '\0', };
+  int restart_error, err_code;
 
   snprintf (dbname_at_hostname, sizeof (dbname_at_hostname), "%s@%s", dbname, hostname);
 
@@ -818,11 +882,13 @@ cubrid_log_db_login (char *hostname, char *dbname, char *username, char *passwor
       goto error;
     }
 
-  if (db_restart ("cubrid_log_api", 0, dbname_at_hostname) != NO_ERROR)
+  restart_error = db_restart ("cubrid_log_api", 0, dbname_at_hostname);
+  if (restart_error != NO_ERROR)
     {
-      cubrid_log_tracelog (__FILE__, __LINE__, __func__, true, CUBRID_LOG_FAILED_LOGIN,
-			   "db_restart failed to connect to %s\n", dbname_at_hostname);
-      return CUBRID_LOG_FAILED_LOGIN;
+      err_code = cubrid_log_map_connect_error (restart_error);
+      cubrid_log_tracelog (__FILE__, __LINE__, __func__, true, err_code,
+			   "db_restart failed to connect to %s (error = %d)\n", dbname_at_hostname, restart_error);
+      return err_code;
     }
 
   user = au_find_user (username);
@@ -890,7 +956,7 @@ cubrid_log_connect_server (char *host, int port, char *dbname, char *user, char 
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_HOST, "host must not be null\n");
     }
 
-  if (port < 0 || port > USHRT_MAX)
+  if (port <= 0 || port > USHRT_MAX)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_PORT,
 				 "invalid port number : %d, port must be greater than 0 and less than %d\n", port,
@@ -907,9 +973,10 @@ cubrid_log_connect_server (char *host, int port, char *dbname, char *user, char 
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_PASSWORD, "password must not be null\n");
     }
 
-  if (cubrid_log_db_login (host, dbname, user, password) != CUBRID_LOG_SUCCESS)
+  err_code = cubrid_log_db_login (host, dbname, user, password);
+  if (err_code != CUBRID_LOG_SUCCESS)
     {
-      CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_LOGIN, NULL);
+      CUBRID_LOG_ERROR_HANDLING (err_code, NULL);
     }
 
   if (er_init (NULL, ER_NEVER_EXIT) != NO_ERROR)
@@ -961,7 +1028,7 @@ cubrid_log_find_start_lsa (time_t * timestamp, LOG_LSA * lsa)
 
   or_pack_int64 (request, (INT64) (*timestamp));
 
-  if (css_send_request_with_data_buffer
+  if (__gv_cvar.css_send_request_with_data_buffer_with_padding
       (g_conn_entry, NET_SERVER_CDC_FIND_LSA, &rid, request, request_size, reply, reply_size) != NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
@@ -970,7 +1037,8 @@ cubrid_log_find_start_lsa (time_t * timestamp, LOG_LSA * lsa)
     }
 
   /* extraction timeout will be replaced when it is defined */
-  if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) != NO_ERRORS)
+  if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) !=
+      NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "receive data from the request(NET_SERVER_CDC_FIND_LSA) failed. (timeout : %d sec)\n",
@@ -1027,12 +1095,7 @@ cubrid_log_error:
       free_and_init (recv_data);
     }
 
-  queue_entry = css_find_queue_entry (g_conn_entry->buffer_queue, rid);
-  if (queue_entry != NULL)
-    {
-      queue_entry->buffer = NULL;
-      css_queue_remove_header_entry_ptr (&g_conn_entry->buffer_queue, queue_entry);
-    }
+  __gv_cvar.css_queue_find_and_remove_header_entry_ptr (g_conn_entry, rid);
 
   return err_code;
 }
@@ -1050,7 +1113,8 @@ cubrid_log_find_lsa (time_t * timestamp, uint64_t * lsa)
 
   if (g_trace_log_level == 1)
     {
-      CUBRID_LOG_WRITE_TRACELOG ("[INPUT] stage (%d), timestamp (%lld)\n", g_stage, *timestamp);
+      CUBRID_LOG_WRITE_TRACELOG ("[INPUT] stage (%d), timestamp (%lld)\n", g_stage,
+				 timestamp ? (long long) *timestamp : 0LL);
     }
 
   if (g_stage != CUBRID_LOG_STAGE_PREPARATION)
@@ -1064,7 +1128,7 @@ cubrid_log_find_lsa (time_t * timestamp, uint64_t * lsa)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_TIMESTAMP,
 				 "timestamp must be greater or equal than 0. Input timestamp is %s, and value is %lld\n",
-				 timestamp ? "not null" : "null", *timestamp);
+				 timestamp ? "not null" : "null", timestamp ? (long long) *timestamp : 0LL);
     }
 
   if (lsa == NULL)
@@ -1121,7 +1185,7 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
   or_pack_log_lsa (request, next_lsa);
 
   /* protocol name will be modified */
-  if (css_send_request_with_data_buffer
+  if (__gv_cvar.css_send_request_with_data_buffer_with_padding
       (g_conn_entry, NET_SERVER_CDC_GET_LOGINFO_METADATA, &rid, request, request_size, reply, reply_size) != NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
@@ -1130,7 +1194,8 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
     }
 
   /* extraction timeout will be modified when it is defined */
-  if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) != NO_ERRORS)
+  if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) !=
+      NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "receive data from the request(NET_SERVER_CDC_GET_LOGINFO_METADATA) failed. (timeout : %d sec)\n",
@@ -1158,6 +1223,11 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
 	  CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_LSA, "Input lsa is not valid (%lld|%d)\n", next_lsa->pageid,
 				     next_lsa->offset);
 	}
+      else
+	{
+	  CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_EXTRACT,
+				     "Failed to extract log info metadata. reply code from server is %d\n", reply_code);
+	}
     }
 
   ptr = or_unpack_log_lsa (ptr, next_lsa);
@@ -1170,8 +1240,16 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
       free_and_init (recv_data);
     }
 
-  if (rc == CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM)
+  if (*num_infos < 0 || *total_length < 0 || (*num_infos > 0 && *total_length <= 0))
     {
+      CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_EXTRACT,
+				 "Invalid log info metadata. num_infos (%d), total_length (%d)\n", *num_infos,
+				 *total_length);
+    }
+
+  if (*num_infos == 0)
+    {
+      rc = CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM;
       goto cubrid_log_end;
     }
 
@@ -1206,7 +1284,7 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
 
   if (*total_length > 0)
     {
-      if (css_send_request_with_data_buffer
+      if (__gv_cvar.css_send_request_with_data_buffer_with_padding
 	  (g_conn_entry, NET_SERVER_CDC_GET_LOGINFO, &rid, NULL, 0, reply, reply_size) != NO_ERRORS)
 	{
 	  CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
@@ -1214,7 +1292,8 @@ cubrid_log_extract_internal (LOG_LSA * next_lsa, int *num_infos, int *total_leng
 	}
 
       /* extraction timeout will be modified when it is defined */
-      if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) != NO_ERRORS)
+      if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000)
+	  != NO_ERRORS)
 	{
 	  CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				     "receive data from the request(NET_SERVER_CDC_GET_LOGINFO) failed. (timeout : %d sec)\n",
@@ -1247,12 +1326,7 @@ cubrid_log_error:
       free_and_init (recv_data);
     }
 
-  queue_entry = css_find_queue_entry (g_conn_entry->buffer_queue, rid);
-  if (queue_entry != NULL)
-    {
-      queue_entry->buffer = NULL;
-      css_queue_remove_header_entry_ptr (&g_conn_entry->buffer_queue, queue_entry);
-    }
+  __gv_cvar.css_queue_find_and_remove_header_entry_ptr (g_conn_entry, rid);
 
   return err_code;
 }
@@ -1285,6 +1359,13 @@ cubrid_log_make_dml (char **data_info, DML * dml)
   int err_code;
 
   ptr = *data_info;
+
+  dml->changed_column_index = NULL;
+  dml->changed_column_data = NULL;
+  dml->changed_column_data_len = NULL;
+  dml->cond_column_index = NULL;
+  dml->cond_column_data = NULL;
+  dml->cond_column_data_len = NULL;
 
   ptr = or_unpack_int (ptr, &dml->dml_type);
   ptr = or_unpack_int64 (ptr, (INT64 *) & dml->classoid);
@@ -1503,6 +1584,13 @@ cubrid_log_make_dml (char **data_info, DML * dml)
 
 cubrid_log_error:
 
+  free_and_init (dml->changed_column_index);
+  free_and_init (dml->changed_column_data);
+  free_and_init (dml->changed_column_data_len);
+  free_and_init (dml->cond_column_index);
+  free_and_init (dml->cond_column_data);
+  free_and_init (dml->cond_column_data_len);
+
   return err_code;
 }
 
@@ -1622,6 +1710,8 @@ cubrid_log_error:
   return err_code;
 }
 
+static int cubrid_log_clear_data_item (DATA_ITEM_TYPE data_item_type, CUBRID_DATA_ITEM * data_item);
+
 static int
 cubrid_log_make_log_item_list (int num_infos, int total_length, CUBRID_LOG_ITEM ** log_item_list, int *list_size)
 {
@@ -1634,6 +1724,20 @@ cubrid_log_make_log_item_list (int num_infos, int total_length, CUBRID_LOG_ITEM 
   if (g_trace_log_level == 1)
     {
       CUBRID_LOG_WRITE_TRACELOG ("[INPUT] num_infos (%d), total_length (%d)\n", num_infos, total_length);
+    }
+
+  if (num_infos <= 0)
+    {
+      *log_item_list = NULL;
+      *list_size = 0;
+      return CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM;
+    }
+
+  if (total_length <= 0)
+    {
+      CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_EXTRACT,
+				 "Invalid log item list metadata. num_infos (%d), total_length (%d)\n", num_infos,
+				 total_length);
     }
 
   if (g_log_items_count < num_infos)
@@ -1659,8 +1763,16 @@ cubrid_log_make_log_item_list (int num_infos, int total_length, CUBRID_LOG_ITEM 
 
   for (i = 0; i < num_infos; i++)
     {
-      if ((rc = cubrid_log_make_log_item (&ptr, &g_log_items[i]) != CUBRID_LOG_SUCCESS))
+      if ((rc = cubrid_log_make_log_item (&ptr, &g_log_items[i])) != CUBRID_LOG_SUCCESS)
 	{
+	  int j;
+
+	  for (j = 0; j < i; j++)
+	    {
+	      (void) cubrid_log_clear_data_item ((DATA_ITEM_TYPE) g_log_items[j].data_item_type,
+						 &g_log_items[j].data_item);
+	    }
+
 	  CUBRID_LOG_ERROR_HANDLING (rc, NULL);
 	}
 
@@ -1700,11 +1812,6 @@ cubrid_log_extract (uint64_t * lsa, CUBRID_LOG_ITEM ** log_item_list, int *list_
   int err_code;
   int rc;
 
-  if (g_trace_log_level == 1)
-    {
-      CUBRID_LOG_WRITE_TRACELOG ("[INPUT] current stage (%d), lsa (%lld)\n", g_stage, *lsa);
-    }
-
   if (g_stage != CUBRID_LOG_STAGE_PREPARATION && g_stage != CUBRID_LOG_STAGE_EXTRACTION)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_INVALID_FUNC_CALL_STAGE,
@@ -1720,16 +1827,27 @@ cubrid_log_extract (uint64_t * lsa, CUBRID_LOG_ITEM ** log_item_list, int *list_
 				 list_size ? "not null" : "null");
     }
 
+  if (g_trace_log_level == 1)
+    {
+      CUBRID_LOG_WRITE_TRACELOG ("[INPUT] current stage (%d), lsa (%lld)\n", g_stage, *lsa);
+    }
+
   memcpy (&g_next_lsa, lsa, sizeof (LOG_LSA));
 
   rc = cubrid_log_extract_internal (&g_next_lsa, &num_infos, &total_length);
 
-  if (rc != CUBRID_LOG_SUCCESS)
+  if (rc != CUBRID_LOG_SUCCESS && rc != CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM)
     {
       CUBRID_LOG_ERROR_HANDLING (rc, NULL);
     }
 
-  if ((rc = cubrid_log_make_log_item_list (num_infos, total_length, log_item_list, list_size)) != CUBRID_LOG_SUCCESS)
+  if (rc == CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM)
+    {
+      *log_item_list = NULL;
+      *list_size = 0;
+    }
+  else if ((rc = cubrid_log_make_log_item_list (num_infos, total_length, log_item_list, list_size)) !=
+	   CUBRID_LOG_SUCCESS && rc != CUBRID_LOG_SUCCESS_WITH_NO_LOGITEM)
     {
       CUBRID_LOG_ERROR_HANDLING (rc, NULL);
     }
@@ -1858,14 +1976,15 @@ cubrid_log_disconnect_server (void)
   CSS_QUEUE_ENTRY *queue_entry;
   int err_code;
 
-  if (css_send_request_with_data_buffer
+  if (__gv_cvar.css_send_request_with_data_buffer_with_padding
       (g_conn_entry, NET_SERVER_CDC_END_SESSION, &rid, NULL, 0, reply, reply_size) != NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "Request(NET_SERVER_CDC_END_SESSION) failed. reply_sze (%d)\n", reply_size);
     }
 
-  if (css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) != NO_ERRORS)
+  if (__gv_cvar.css_receive_data (g_conn_entry, rid, &recv_data, &recv_data_size, g_extraction_timeout * 1000) !=
+      NO_ERRORS)
     {
       CUBRID_LOG_ERROR_HANDLING (CUBRID_LOG_FAILED_CONNECT,
 				 "receive data from the request(NET_SERVER_CDC_END_SESSION) failed. (timeout : %d sec)\n",
@@ -1890,7 +2009,7 @@ cubrid_log_disconnect_server (void)
       free_and_init (recv_data);
     }
 
-  css_free_conn (g_conn_entry);
+  __gv_cvar.css_free_conn (g_conn_entry);
   g_conn_entry = NULL;
 
   return CUBRID_LOG_SUCCESS;
@@ -1904,14 +2023,8 @@ cubrid_log_error:
 
   if (g_conn_entry != NULL)
     {
-      queue_entry = css_find_queue_entry (g_conn_entry->buffer_queue, rid);
-      if (queue_entry != NULL)
-	{
-	  queue_entry->buffer = NULL;
-	  css_queue_remove_header_entry_ptr (&g_conn_entry->buffer_queue, queue_entry);
-	}
-
-      css_free_conn (g_conn_entry);
+      __gv_cvar.css_queue_find_and_remove_header_entry_ptr (g_conn_entry, rid);
+      __gv_cvar.css_free_conn (g_conn_entry);
       g_conn_entry = NULL;
     }
 
@@ -1955,8 +2068,7 @@ cubrid_log_reset_globals (void)
 
   if (g_log_infos != NULL)
     {
-//      free (g_log_infos);
-      g_log_infos = NULL;
+      free_and_init (g_log_infos);
     }
 
   g_log_infos_size = 0;

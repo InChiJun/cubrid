@@ -912,10 +912,9 @@ spage_get_free_space (THREAD_ENTRY * thread_p, PAGE_PTR page_p)
  *   return: Total free space
  *
  *   page_p(in): Pointer to slotted page
- *   need_update(out): Value of need_update_best_hint
  */
 int
-spage_get_free_space_without_saving (THREAD_ENTRY * thread_p, PAGE_PTR page_p, bool * need_update)
+spage_get_free_space_without_saving (THREAD_ENTRY * thread_p, PAGE_PTR page_p)
 {
   SPAGE_HEADER *page_header_p;
   int free_space;
@@ -924,11 +923,6 @@ spage_get_free_space_without_saving (THREAD_ENTRY * thread_p, PAGE_PTR page_p, b
 
   page_header_p = (SPAGE_HEADER *) page_p;
   SPAGE_VERIFY_HEADER (page_header_p);
-
-  if (need_update != NULL)
-    {
-      *need_update = page_header_p->need_update_best_hint;
-    }
 
   free_space = page_header_p->total_free;
   if (free_space < 0)
@@ -939,29 +933,6 @@ spage_get_free_space_without_saving (THREAD_ENTRY * thread_p, PAGE_PTR page_p, b
     }
 
   return free_space;
-}
-
-/*
- * spage_set_need_update_best_hint () - Set need_update_best_hint on slotted page header
- *   return: void
- *
- *   page_p(in): Pointer to slotted page
- *   need_update(in): Value of need_update_best_hint
- *
- * NOTE: We will set this value as TRUE when we failed updating best page hints
- *       on heap header. See heap_stats_update function.
- */
-void
-spage_set_need_update_best_hint (THREAD_ENTRY * thread_p, PAGE_PTR page_p, bool need_update)
-{
-  SPAGE_HEADER *page_header_p;
-
-  assert (page_p != NULL);
-
-  page_header_p = (SPAGE_HEADER *) page_p;
-  SPAGE_VERIFY_HEADER (page_header_p);
-
-  page_header_p->need_update_best_hint = need_update;
 }
 
 /*
@@ -1106,7 +1077,6 @@ spage_initialize (THREAD_ENTRY * thread_p, PAGE_PTR page_p, INT16 slot_type, uns
   page_header_p->num_records = 0;
   page_header_p->is_saving = is_saving;
   page_header_p->flags = SPAGE_HEADER_FLAG_NONE;
-  page_header_p->need_update_best_hint = 0;
   page_header_p->reserved_bits = 0;
   page_header_p->reserved1 = 0;
 
@@ -4216,8 +4186,8 @@ spage_dump_header_to_string (char *buffer, int size, const SPAGE_HEADER * page_h
   n +=
     snprintf (buffer + n, size - n,
 	      "TOTAL FREE AREA = %d, CONTIGUOUS FREE AREA = %d,"
-	      " FREE SPACE OFFSET = %d, NEED UPDATE BEST HINT = %d\n", page_header_p->total_free,
-	      page_header_p->cont_free, page_header_p->offset_to_free_area, page_header_p->need_update_best_hint);
+	      " FREE SPACE OFFSET = %d\n", page_header_p->total_free,
+	      page_header_p->cont_free, page_header_p->offset_to_free_area);
   n += snprintf (buffer + n, size - n, "IS_SAVING = %d\n", page_header_p->is_saving);
 }
 
@@ -4551,18 +4521,49 @@ spage_check_slot_owner (THREAD_ENTRY * thread_p, PAGE_PTR page_p, PGSLOTID slot_
 STATIC_INLINE bool
 spage_is_unknown_slot (PGSLOTID slot_id, SPAGE_HEADER * page_header_p, SPAGE_SLOT * slot_p)
 {
-  unsigned int max_offset;
-
   assert (slot_p != NULL);
   SPAGE_VERIFY_HEADER (page_header_p);
 
-  max_offset = SPAGE_DB_PAGESIZE - page_header_p->num_slots * sizeof (SPAGE_SLOT);
+  const int offset = slot_p->offset_to_record;
+  const int num_slots = page_header_p->num_slots;
 
-  assert_release (slot_p->offset_to_record >= sizeof (SPAGE_HEADER) || slot_p->offset_to_record == SPAGE_EMPTY_OFFSET);
-  assert_release (slot_p->offset_to_record <= max_offset);
+  if (unlikely (slot_id < 0 || slot_id >= num_slots))
+    {
+#if defined (NDEBUG)
+      assert_release (slot_id >= 0 && slot_id < num_slots);
+#else
+      er_log_debug (ARG_FILE_LINE, "Invalid ID : id=%d, num_slots=%d\n", slot_id, num_slots);
+#endif
+      return true;
+    }
 
-  return (slot_id < 0 || slot_id >= page_header_p->num_slots || slot_p->offset_to_record == SPAGE_EMPTY_OFFSET
-	  || slot_p->offset_to_record < sizeof (SPAGE_HEADER) || slot_p->offset_to_record > max_offset);
+  if (unlikely (offset == SPAGE_EMPTY_OFFSET || offset < (int) sizeof (SPAGE_HEADER)))
+    {
+#if defined (NDEBUG)
+      assert_release (offset != SPAGE_EMPTY_OFFSET && offset >= (int) sizeof (SPAGE_HEADER));
+#else
+      er_log_debug (ARG_FILE_LINE, "Offset violates header boundary : offset=%d, size of SPAGE_HEADER=%zu\n", offset,
+		    sizeof (SPAGE_HEADER));
+#endif
+      return true;
+    }
+
+  const unsigned int total_slots_size = (unsigned int) num_slots * sizeof (SPAGE_SLOT);
+  if (unlikely
+      (total_slots_size > (unsigned int) SPAGE_DB_PAGESIZE || offset > (int) (SPAGE_DB_PAGESIZE - total_slots_size)))
+    {
+#if defined (NDEBUG)
+      assert_release (total_slots_size <= (unsigned int) SPAGE_DB_PAGESIZE
+		      && offset <= (int) (SPAGE_DB_PAGESIZE - total_slots_size));
+#else
+      er_log_debug (ARG_FILE_LINE,
+		    "Offset violates slot array boundary : offset=%d, total_slots_size=%u, SPAGE_DB_PAGESIZE=%d\n",
+		    offset, total_slots_size, SPAGE_DB_PAGESIZE);
+#endif
+      return true;
+    }
+
+  return false;
 }
 
 /*
@@ -4739,7 +4740,6 @@ spage_get_page_header_info (PAGE_PTR page_p, DB_VALUE ** page_header_info)
   db_make_int (page_header_info[HEAP_PAGE_INFO_CONT_FREE], page_header_p->cont_free);
   db_make_int (page_header_info[HEAP_PAGE_INFO_OFFSET_TO_FREE_AREA], page_header_p->offset_to_free_area);
   db_make_int (page_header_info[HEAP_PAGE_INFO_IS_SAVING], page_header_p->is_saving);
-  db_make_int (page_header_info[HEAP_PAGE_INFO_UPDATE_BEST], page_header_p->need_update_best_hint);
 
   return S_SUCCESS;
 }
@@ -5016,9 +5016,6 @@ spage_header_next_scan (THREAD_ENTRY * thread_p, int cursor, DB_VALUE ** out_val
   idx++;
 
   db_make_int (out_values[idx], header->offset_to_free_area);
-  idx++;
-
-  db_make_int (out_values[idx], header->need_update_best_hint);
   idx++;
 
   db_make_int (out_values[idx], header->is_saving);

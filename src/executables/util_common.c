@@ -444,9 +444,9 @@ fopen_ex (const char *filename, const char *type)
  * utility_keyword_search
  */
 int
-utility_keyword_search (UTIL_KEYWORD * keywords, int *keyval_p, char **keystr_p)
+utility_keyword_search (const UTIL_KEYWORD * keywords, int *keyval_p, char **keystr_p)
 {
-  UTIL_KEYWORD *keyp;
+  const UTIL_KEYWORD *keyp;
 
   if (*keyval_p >= 0 && *keystr_p == NULL)
     {
@@ -631,7 +631,7 @@ util_split_ha_sync (const char *str)
 int
 copylogdb_keyword (int *keyval_p, char **keystr_p)
 {
-  static UTIL_KEYWORD keywords[] = {
+  static const UTIL_KEYWORD keywords[] = {
     {LOGWR_MODE_ASYNC, "async"},
     {LOGWR_MODE_SEMISYNC, "semisync"},
     {LOGWR_MODE_SYNC, "sync"},
@@ -650,7 +650,7 @@ copylogdb_keyword (int *keyval_p, char **keystr_p)
 int
 changemode_keyword (int *keyval_p, char **keystr_p)
 {
-  static UTIL_KEYWORD keywords[] = {
+  static const UTIL_KEYWORD keywords[] = {
     {HA_SERVER_STATE_IDLE, HA_SERVER_STATE_IDLE_STR},
     {HA_SERVER_STATE_ACTIVE, HA_SERVER_STATE_ACTIVE_STR},
     {HA_SERVER_STATE_TO_BE_ACTIVE, HA_SERVER_STATE_TO_BE_ACTIVE_STR},
@@ -809,7 +809,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
   if (ha_conf->db_names == NULL)
     {
       const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-      fprintf (stderr, message);
+      fprintf (stderr, "%s", message);
 
       error = ER_GENERIC_ERROR;
       goto ret;
@@ -819,7 +819,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
   if (ha_node_list_pp == NULL)
     {
       const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-      fprintf (stderr, message);
+      fprintf (stderr, "%s", message);
 
       error = ER_GENERIC_ERROR;
       goto ret;
@@ -835,7 +835,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
   if (ha_conf->node_conf == NULL)
     {
       const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-      fprintf (stderr, message);
+      fprintf (stderr, "%s", message);
 
       error = ER_GENERIC_ERROR;
       goto ret;
@@ -853,7 +853,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
 	  if (ha_conf->node_conf[i].copy_sync_mode == NULL)
 	    {
 	      const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-	      fprintf (stderr, message);
+	      fprintf (stderr, "%s", message);
 
 	      error = ER_GENERIC_ERROR;
 	      goto ret;
@@ -870,7 +870,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
 	      if (ha_conf->node_conf[i].copy_sync_mode == NULL)
 		{
 		  const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-		  fprintf (stderr, message);
+		  fprintf (stderr, "%s", message);
 
 		  error = ER_GENERIC_ERROR;
 		  goto ret;
@@ -885,7 +885,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
 	  if (ha_sync_mode_pp == NULL)
 	    {
 	      const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-	      fprintf (stderr, message);
+	      fprintf (stderr, "%s", message);
 
 	      error = ER_GENERIC_ERROR;
 	      goto ret;
@@ -909,7 +909,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
 	      if (ha_conf->node_conf[i].copy_sync_mode == NULL)
 		{
 		  const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-		  fprintf (stderr, message);
+		  fprintf (stderr, "%s", message);
 
 		  error = ER_GENERIC_ERROR;
 		  goto ret;
@@ -929,7 +929,7 @@ util_make_ha_conf (HA_CONF * ha_conf)
       if (ha_conf->node_conf[i].node_name == NULL || ha_conf->node_conf[i].copy_log_base == NULL)
 	{
 	  const char *message = utility_get_generic_message (MSGCAT_UTIL_GENERIC_NO_MEM);
-	  fprintf (stderr, message);
+	  fprintf (stderr, "%s", message);
 
 	  error = ER_GENERIC_ERROR;
 	  goto ret;

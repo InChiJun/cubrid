@@ -1544,13 +1544,21 @@ or_unpack_int_array (char *ptr, int n, int **number_array)
 {
   int i;
 
-  *number_array = (int *) db_private_alloc (NULL, (n * sizeof (int)));
-  if (*number_array)
+  ASSERT_ALIGN (ptr, INT_ALIGNMENT);
+
+  if (n > 0)
     {
-      ASSERT_ALIGN (ptr, INT_ALIGNMENT);
-      for (i = 0; i < n; i++)
+      *number_array = (int *) db_private_alloc (NULL, (n * sizeof (int)));
+      if (*number_array)
 	{
-	  ptr = or_unpack_int (ptr, &(*number_array)[i]);
+	  for (i = 0; i < n; i++)
+	    {
+	      ptr = or_unpack_int (ptr, &(*number_array)[i]);
+	    }
+	}
+      else
+	{
+	  ptr = NULL;
 	}
     }
   else
@@ -2519,7 +2527,17 @@ or_decode (const char *buffer, char *dest, int size)
 
 #define OR_DOMAIN_SCALE_MASK		(0xFF00)
 #define OR_DOMAIN_SCALE_SHIFT		(8)
-#define OR_DOMAIN_SCALE_MAX		(0xFF)
+
+/* Scale encoding (1 byte):
+ *   0 ~ 127      : direct scale
+ *   otherwise    : extended scale follows
+ *              - for scale >= 128
+ *              - for scale in range -211 .. -1
+ *
+ * Note: 0xFF acts as a flag indicating "read actual scale from extra bytes".
+ */
+#define OR_DOMAIN_SCALE_EXT_FLAG       (128)	/* MSB set => extended encoding */
+#define OR_DOMAIN_SCALE_MAX            (0xFF)	/* extended scale follows in extra bytes */
 
 #define OR_DOMAIN_CODSET_MASK		(0xFF00)
 #define OR_DOMAIN_CODSET_SHIFT		(8)
@@ -2645,7 +2663,7 @@ or_packed_domain_size (TP_DOMAIN * domain, int include_classoids)
 	  size += OR_INT_SIZE;
 	}
 
-      if (scale >= OR_DOMAIN_SCALE_MAX)
+      if (scale >= OR_DOMAIN_SCALE_EXT_FLAG || scale < 0)
 	{
 	  size += OR_INT_SIZE;
 	}
@@ -2676,7 +2694,8 @@ or_packed_domain_size (TP_DOMAIN * domain, int include_classoids)
 int
 or_put_domain (OR_BUF * buf, TP_DOMAIN * domain, int include_classoids, int is_null)
 {
-  unsigned int carrier, extended_precision, extended_scale;
+  unsigned int carrier, extended_precision;
+  int extended_scale;
   int precision, scale;
   int has_oid, has_subdomain, has_enum;
   bool has_schema;
@@ -2754,14 +2773,14 @@ or_put_domain (OR_BUF * buf, TP_DOMAIN * domain, int include_classoids, int is_n
 	      scale = 0;
 	    }
 
-	  if (scale < OR_DOMAIN_SCALE_MAX)
-	    {
-	      carrier |= scale << OR_DOMAIN_SCALE_SHIFT;
-	    }
-	  else
+	  if (scale >= OR_DOMAIN_SCALE_EXT_FLAG || scale < 0)
 	    {
 	      carrier |= OR_DOMAIN_SCALE_MAX << OR_DOMAIN_SCALE_SHIFT;
 	      extended_scale = d->scale;
+	    }
+	  else
+	    {
+	      carrier |= scale << OR_DOMAIN_SCALE_SHIFT;
 	    }
 	  /* handle all precisions the same way at the end */
 	  precision = d->precision;
@@ -2986,8 +3005,8 @@ static TP_DOMAIN *
 unpack_domain_2 (OR_BUF * buf, int *is_null)
 {
   TP_DOMAIN *domain, *last, *d;
-  unsigned int carrier, precision, scale, codeset, has_classoid, has_setdomain, has_enum, collation_id,
-    collation_storage;
+  unsigned int carrier, precision, codeset, has_classoid, has_setdomain, has_enum, collation_id, collation_storage;
+  int scale;
   bool has_schema;
   bool more, auto_precision, is_desc, has_collation;
   DB_TYPE type;
@@ -3172,7 +3191,7 @@ unpack_domain_2 (OR_BUF * buf, int *is_null)
 	      goto error;
 	    }
 
-	  /* do we have an extra scale word ? */
+	  /* extra scale now follows new rules (see OR_DOMAIN_SCALE_* defines) */
 	  if (scale == OR_DOMAIN_SCALE_MAX)
 	    {
 	      scale = or_get_int (buf, &rc);
@@ -3326,7 +3345,8 @@ unpack_domain (OR_BUF * buf, int *is_null)
   DB_TYPE type;
   bool more, is_desc;
   unsigned int carrier, index;
-  unsigned int precision, scale, codeset = 0, collation_id;
+  unsigned int precision, codeset = 0, collation_id;
+  int scale;
   OID class_oid;
   struct db_object *class_mop = NULL;
   int rc = NO_ERROR;
@@ -3335,7 +3355,8 @@ unpack_domain (OR_BUF * buf, int *is_null)
   unsigned char collation_flag;
 
   domain = last = dom = setdomain = NULL;
-  precision = scale = 0;
+  precision = 0;
+  scale = 0;
 
   char *schema_raw = NULL;
 
@@ -3418,7 +3439,7 @@ unpack_domain (OR_BUF * buf, int *is_null)
 		      goto error;
 		    }
 		}
-	      /* do we have an extra scale word ? */
+	      /* extra scale now follows new rules (see OR_DOMAIN_SCALE_* defines) */
 	      if (scale == OR_DOMAIN_SCALE_MAX)
 		{
 		  scale = or_get_int (buf, &rc);
@@ -5752,6 +5773,37 @@ or_header_size (char *ptr)
   return mvcc_header_size_lookup[OR_GET_MVCC_FLAG (ptr)]; // header에 어떤 정보까지 기재했는지 여부에 따라 size 반환(mvcc_delid or prev_lsa가 없는 경우 등등 각 사이즈가 결정되는 케이스가 다름)
 }
 
+/*
+ * or_pack_int_array - write a int array
+ *    return: advanced buffer pointer
+ *    buffer(out): output buffer
+ *    count(in): array length
+ *    int_array(in): int array
+ */
+char *
+or_pack_int_array (char *buffer, int count, const int *int_array)
+{
+  int i;
+  char *ptr;
+
+  assert (buffer != NULL && int_array != NULL && count >= 0);
+
+  if (count < 0 || int_array == NULL)
+    {
+      count = 0;
+    }
+
+  /* pack count + that many integers */
+  ptr = or_pack_int (buffer, count);
+
+  for (i = 0; i < count; i++)
+    {
+      ptr = or_pack_int (ptr, int_array[i]);
+    }
+
+  return ptr;
+}
+
 #if defined(ENABLE_UNUSED_FUNCTION)
 /*
  * or_packed_string_array_length - get the amount of space needed to pack an
@@ -5793,36 +5845,6 @@ or_packed_db_value_array_length (int count, DB_VALUE * val)
       size += or_db_value_size (val++);
     }
   return size;
-}
-
-/*
- * or_pack_int_array - write a int array
- *    return: advanced buffer pointer
- *    buffer(out): output buffer
- *    count(in): array length
- *    int_array(in): int array
- */
-char *
-or_pack_int_array (char *buffer, int count, int *int_array)
-{
-  int i;
-  char *ptr;
-
-  if (!int_array)
-    {
-      /* there are no values to pack, so pack a count of 0 */
-      ptr = or_pack_int (buffer, 0);
-    }
-  else
-    {
-      /* pack count + that many integers */
-      ptr = or_pack_int (buffer, count);
-      for (i = 0; i < count; i++)
-	{
-	  ptr = or_pack_int (ptr, int_array[i]);
-	}
-    }
-  return ptr;
 }
 
 /*

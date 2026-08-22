@@ -102,7 +102,6 @@ namespace memoize
 	case ACCESS_METHOD_SEQUENTIAL_PAGE_SCAN:
 	case ACCESS_METHOD_INDEX_KEY_INFO:
 	case ACCESS_METHOD_INDEX_NODE_INFO:
-	case ACCESS_METHOD_SEQUENTIAL_SAMPLING_SCAN:
 	  return false;
 	  break;
 
@@ -1103,6 +1102,7 @@ extern "C"
 	  {
 	    xasl->memoize_storage->stop_timer();
 	  }
+	clear_memoize_storage (thread_p, xasl);
 	return NO_ERROR;
 	break;
 
@@ -1154,6 +1154,7 @@ extern "C"
 	  {
 	    xasl->memoize_storage->stop_timer();
 	  }
+	clear_memoize_storage (thread_p, xasl);
 	return NO_ERROR;
 	break;
 
@@ -1201,6 +1202,7 @@ extern "C"
 	  {
 	    xasl->memoize_storage->stop_timer();
 	  }
+	clear_memoize_storage (thread_p, xasl);
 	return NO_ERROR;
 	break;
 

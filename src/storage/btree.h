@@ -829,6 +829,21 @@ extern int xbtree_get_key_type (THREAD_ENTRY * thread_p, BTID btid, TP_DOMAIN **
 
 extern int btree_leaf_get_first_object (BTID_INT * btid, RECDES * recp, OID * oidp, OID * class_oid,
 					BTREE_MVCC_INFO * mvcc_info);
+extern bool btree_leaf_record_is_fence (RECDES * recp);
+
+/* Callback function type for btree_key_process_objects.
+ * Concrete callbacks: btree_record_satisfies_snapshot,
+ * btree_select_visible_object_for_range_scan, btree_fk_object_does_exist. */
+typedef int BTREE_PROCESS_OBJECT_FUNCTION (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * record,
+					   char *object_ptr, OID * oid, OID * class_oid, BTREE_MVCC_INFO * mvcc_info,
+					   bool * stop, void *args);
+extern int btree_key_process_objects (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * leaf_record,
+				      int after_key_offset, LEAF_REC * leaf_info,
+				      BTREE_PROCESS_OBJECT_FUNCTION * func, void *args);
+/* [Reused by parallel index scan] streams one record (leaf or overflow). PRECONDITION: caller holds at least PGBUF_LATCH_READ on the page from which 'record' was peeked. */
+extern int btree_record_process_objects (THREAD_ENTRY * thread_p, BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
+					 RECDES * record, int after_key_offset, bool * stop,
+					 BTREE_PROCESS_OBJECT_FUNCTION * func, void *args);
 extern void btree_leaf_change_first_object (THREAD_ENTRY * thread_p, RECDES * recp, BTID_INT * btid, OID * oidp,
 					    OID * class_oidp, BTREE_MVCC_INFO * mvcc_info, int *key_offset,
 					    char **rv_undo_data_ptr, char **rv_redo_data_ptr);
@@ -891,13 +906,26 @@ extern int btree_initialize_new_page (THREAD_ENTRY * thread_p, PAGE_PTR page, vo
 
 extern int btree_locate_key (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_VALUE * key, VPID * pg_vpid,
 			     INT16 * slot_id, PAGE_PTR * leaf_page_out, bool * found_p);
+/* exposed for parallel index scan key-comparison descent */
+extern int btree_search_nonleaf_page (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR page_ptr, DB_VALUE * key,
+				      INT16 * slot_id, VPID * child_vpid, page_key_boundary * page_bounds);
 extern int btree_get_num_visible_from_leaf_and_ovf (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * leaf_record,
 						    int offset_after_key, LEAF_REC * leaf_info, int *max_visible_oids,
 						    MVCC_SNAPSHOT * mvcc_snapshot, int *num_visible);
 
+/* Stores an overflow key on behalf of btree_write_record_ex () and returns the VPID of its first page.  Lets the
+ * parallel no-logging index build route overflow keys through its own page provider instead of
+ * btree_store_overflow_key (). */
+typedef int (*BTREE_STORE_OVF_KEY_FUNC) (THREAD_ENTRY * thread_p, void *arg, DB_VALUE * key, int key_len,
+					 BTREE_NODE_TYPE node_type, VPID * first_vpid);
+
 extern int btree_write_record (THREAD_ENTRY * thread_p, BTID_INT * btid, void *node_rec, DB_VALUE * key,
 			       BTREE_NODE_TYPE node_type, int key_type, int key_len, bool during_loading,
 			       OID * class_oid, OID * oid, BTREE_MVCC_INFO * mvcc_info, RECDES * rec);
+extern int btree_write_record_ex (THREAD_ENTRY * thread_p, BTID_INT * btid, void *node_rec, DB_VALUE * key,
+				  BTREE_NODE_TYPE node_type, int key_type, int key_len, bool during_loading,
+				  OID * class_oid, OID * oid, BTREE_MVCC_INFO * mvcc_info, RECDES * rec,
+				  BTREE_STORE_OVF_KEY_FUNC store_ovf_key_fn, void *store_ovf_key_arg);
 extern int btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, RECDES * Rec, DB_VALUE * key,
 			      void *rec_header, BTREE_NODE_TYPE node_type, bool * clear_key, int *offset, int copy,
 			      BTREE_SCAN * bts);

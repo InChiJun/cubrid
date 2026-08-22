@@ -148,6 +148,34 @@ struct file_tablespace
   int expand_max_size;
 };
 
+/* FILE_ALLOC_BITMAP -
+ * Type used to store allocation bitmap for sectors.  */
+typedef UINT64 FILE_ALLOC_BITMAP;
+#define FILE_FULL_PAGE_BITMAP	    0xFFFFFFFFFFFFFFFF	/* Full allocation bitmap */
+#define FILE_EMPTY_PAGE_BITMAP	    0x0000000000000000	/* Empty allocation bitmap */
+
+#define FILE_ALLOC_BITMAP_NBITS ((int) (sizeof (FILE_ALLOC_BITMAP) * CHAR_BIT))
+
+/* FILE_PARTIAL_SECTOR -
+ * Structure used by partially allocated sectors table. Store sector VSID and its allocation bitmap. */
+typedef struct file_partial_sector FILE_PARTIAL_SECTOR;
+struct file_partial_sector
+{
+  VSID vsid;			/* Important - VSID must be first member of FILE_PARTIAL_SECTOR. Sometimes, the // FILE_PARTIAL_SECTOR 구조체의 첫 멤버변수가 VSID여야 하고 그 이유는 FILE_PARTIAL_SECTOR를 포인터로 참조할 때 바로 VSID로 캐스팅하는 경우가 많다는 내용임
+				 * FILE_PARTIAL_SECTOR pointers in file table are reinterpreted as VSID. */     // [refactor] FILE_PARTIAL_SECTOR를 VSID로 캐스팅해서 참조한다는 이유로 첫 멤버 변수를 제한하는 것은 부적절하므로, VSID로 캐스팅하여 참조하는 코드 삭제할 필요가 있음
+  FILE_ALLOC_BITMAP page_bitmap;
+};
+#define FILE_PARTIAL_SECTOR_INITIALIZER { VSID_INITIALIZER, 0 }
+
+typedef struct file_ftab_collector FILE_FTAB_COLLECTOR;
+struct file_ftab_collector
+{
+  int npages;
+  int nsects;
+  FILE_PARTIAL_SECTOR *partsect_ftab;
+};
+#define FILE_FTAB_COLLECTOR_INITIALIZER { 0, 0, NULL }
+
 typedef int (*FILE_INIT_PAGE_FUNC) (THREAD_ENTRY * thread_p, PAGE_PTR page, void *args);
 typedef int (*FILE_MAP_PAGE_FUNC) (THREAD_ENTRY * thread_p, PAGE_PTR * page, bool * stop, void *args);
 
@@ -189,7 +217,7 @@ extern int file_apply_tde_algorithm (THREAD_ENTRY * thread_p, const VFID * vfid,
 extern int file_dealloc (THREAD_ENTRY * thread_p, const VFID * vfid, const VPID * vpid, FILE_TYPE file_type_hint);
 
 extern int file_get_num_user_pages (THREAD_ENTRY * thread_p, const VFID * vfid, int *n_user_pages_out);
-extern int file_get_num_total_user_pages (THREAD_ENTRY * thread_p, OID * class_oid, int *n_user_pages_out);
+extern int file_get_num_total_user_pages (THREAD_ENTRY * thread_p, OID * class_oid, int *n_data_pages_out);
 extern DISK_ISVALID file_check_vpid (THREAD_ENTRY * thread_p, const VFID * vfid, const VPID * vpid_lookup);
 extern int file_get_type (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_TYPE * ftype_out);
 extern int file_is_temp (THREAD_ENTRY * thread_p, const VFID * vfid, bool * is_temp);
@@ -260,4 +288,9 @@ extern void file_rv_dump_vfid_and_vpid (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_set_next (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_add (FILE * fp, int length, void *data);
 extern void file_rv_dump_extdata_remove (FILE * fp, int length, void *data);
+
+/* partial file scan stuff */
+extern int file_get_all_data_sectors (THREAD_ENTRY * thread_p, const VFID * vfid, FILE_FTAB_COLLECTOR * collector_out);
+extern int file_get_num_data_sectors (THREAD_ENTRY * thread_p, const VFID * vfid, int *n_sectors_out);
+
 #endif /* _FILE_MANAGER_H_ */

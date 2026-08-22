@@ -20,6 +20,7 @@
  * parse_tree_cl.c - Parser module for the client
  */
 
+
 #ident "$Id$"
 
 #include "config.h"
@@ -2935,7 +2936,24 @@ pt_print_and_list (PARSER_CONTEXT * parser, const PT_NODE * p)
 
   for (n = p; n; n = n->next)
     {				/* print in the original order ... */
+      /* A term shipped into the DBLink conn_sql runs on the remote side only; the plan-dump
+       * printers request it hidden so the dump matches the actual local predicate.  The " and "
+       * separator is emitted before every term but the first printed one, so a skipped term
+       * leaves no dangling separator; if every term is skipped, NULL is returned and the
+       * caller omits the "where" keyword as for an empty list. */
+      if ((parser->custom_print & PT_PRINT_SUPPRESS_DBLINK_PUSHED) && n->node_type == PT_EXPR
+	  && PT_EXPR_INFO_IS_FLAGED (n, PT_EXPR_INFO_DBLINK_PUSHED))
+	{
+	  continue;
+	}
+
       r1 = pt_print_bytes (parser, n);
+
+      if (q != NULL)
+	{
+	  q = pt_append_nulstring (parser, q, " and ");
+	}
+
       if (n->node_type == PT_EXPR && !n->info.expr.paren_type && n->or_next)
 	{
 	  /* found non-parenthesis OR */
@@ -2946,11 +2964,6 @@ pt_print_and_list (PARSER_CONTEXT * parser, const PT_NODE * p)
       else
 	{
 	  q = pt_append_varchar (parser, q, r1);
-	}
-
-      if (n->next)
-	{
-	  q = pt_append_nulstring (parser, q, " and ");
 	}
     }
 
@@ -4018,6 +4031,8 @@ pt_show_binopcode (PT_OP_TYPE n)
       return "list_dbs ";
     case PT_SYS_GUID:
       return "sys_guid ";
+    case PT_UUID:
+      return "uuid ";
     case PT_OID_OF_DUPLICATE_KEY:
       return "oid_of_duplicate_key ";
     case PT_BIT_TO_BLOB:
@@ -4042,6 +4057,14 @@ pt_show_binopcode (PT_OP_TYPE n)
       return "typeof ";
     case PT_INDEX_CARDINALITY:
       return "index_cardinality ";
+    case PT_ESTIMATED_TABLE_ROWS:
+      return "estimated_table_rows";
+    case PT_ESTIMATED_AVG_ROW_LENGTH:
+      return "estimated_avg_row_length";
+    case PT_ESTIMATED_DATA_LENGTH:
+      return "estimated_data_length";
+    case PT_ESTIMATED_DATA_FREE:
+      return "estimated_data_free";
     case PT_EVALUATE_VARIABLE:
       return "evaluate_variable";
     case PT_DEFINE_VARIABLE:
@@ -4090,6 +4113,10 @@ pt_show_binopcode (PT_OP_TYPE n)
       return "schema_def";
     case PT_CONV_TZ:
       return "conv_tz";
+    case PT_COLLECTION_TO_STRING:
+      return "collection_to_string";
+    case PT_UUID_FORMAT:
+      return "uuid_format";
     default:
       assert (false);
       return "unknown opcode";
@@ -6532,6 +6559,15 @@ pt_print_alter_user (PARSER_CONTEXT * parser, PT_NODE * p)
 	}
     }
 
+  if (p->info.alter_user.login_capability == PT_LOGIN)
+    {
+      b = pt_append_nulstring (parser, b, " login");
+    }
+  else if (p->info.alter_user.login_capability == PT_NOLOGIN)
+    {
+      b = pt_append_nulstring (parser, b, " nologin");
+    }
+
   if (p->info.alter_user.comment != NULL)
     {
       r1 = pt_print_bytes (parser, p->info.alter_user.comment);
@@ -6714,8 +6750,7 @@ pt_print_attr_def (PARSER_CONTEXT * parser, PT_NODE * p)
       if (p->data_type)
 	{
 	  /* only show non-default parameter */
-	  if (p->data_type->info.data_type.precision != DB_DEFAULT_NUMERIC_PRECISION
-	      || p->data_type->info.data_type.dec_precision != DB_DEFAULT_NUMERIC_SCALE)
+	  if (p->data_type->info.data_type.precision != DB_DEFAULT_NUMERIC_PRECISION)
 	    {
 	      sprintf (s, "(%d,%d)", p->data_type->info.data_type.precision,
 		       p->data_type->info.data_type.dec_precision);
@@ -6742,6 +6777,7 @@ pt_print_attr_def (PARSER_CONTEXT * parser, PT_NODE * p)
 	      /* fixed data type: always show parameter */
 	      show_precision = true;
 	      break;
+
 	    default:
 	      /* variable data type: only show non-maximum(i.e., default) parameter */
 	      if (precision == TP_FLOATING_PRECISION_VALUE)
@@ -6817,6 +6853,11 @@ pt_print_attr_def (PARSER_CONTEXT * parser, PT_NODE * p)
     {
       sprintf (s, " collate %s", lang_get_collation_name (p->data_type->info.data_type.collation_id));
       q = pt_append_nulstring (parser, q, s);
+    }
+
+  if (p->info.attr_def.attr_invisible == PT_ATTR_INVISIBLE)
+    {
+      q = pt_append_nulstring (parser, q, " invisible ");
     }
 
   if (p->info.attr_def.data_default)
@@ -7317,6 +7358,9 @@ pt_print_create_entity (PARSER_CONTEXT * parser, PT_NODE * p)
   return q;
 }
 
+
+
+
 /* CREATE_INDEX */
 /*
  * pt_apply_create_index () -
@@ -7524,6 +7568,11 @@ pt_print_create_user (PARSER_CONTEXT * parser, PT_NODE * p)
       b = pt_append_nulstring (parser, b, " password ");
       b = pt_append_varchar (parser, b, r1);
     }
+  /* "login" is the default, so the output stays the same as before the clause existed. */
+  if (p->info.create_user.login_capability == PT_NOLOGIN)
+    {
+      b = pt_append_nulstring (parser, b, " nologin");
+    }
   if (p->info.create_user.groups)
     {
       r1 = pt_print_bytes (parser, p->info.create_user.groups);
@@ -7673,9 +7722,7 @@ pt_print_create_stored_procedure (PARSER_CONTEXT * parser, PT_NODE * p)
 {
   PARSER_VARCHAR *q = NULL, *r1, *r2, *r3;
 
-  r1 = pt_print_bytes (parser, p->info.sp.name);
-
-  if (parser->flag.is_unloading_schema)
+  if (parser->flag.is_unloading_plcsql_def)
     {
       q = pt_append_nulstring (parser, q, "CREATE OR REPLACE ");
       q = pt_append_nulstring (parser, q, (p->info.sp.type == PT_SP_PROCEDURE) ? "PROCEDURE" : "FUNCTION");
@@ -7691,14 +7738,8 @@ pt_print_create_stored_procedure (PARSER_CONTEXT * parser, PT_NODE * p)
     }
 
   q = pt_append_nulstring (parser, q, " ");
-  if (parser->custom_print & (PT_PRINT_NO_SPECIFIED_USER_NAME | PT_PRINT_NO_CURRENT_USER_NAME))
-    {
-      q = pt_append_name (parser, q, p->info.sp.name->info.name.original);
-    }
-  else
-    {
-      q = pt_append_varchar (parser, q, r1);
-    }
+  r1 = pt_print_bytes (parser, p->info.sp.name);
+  q = pt_append_varchar (parser, q, r1);
 
   r2 = pt_print_bytes_l (parser, p->info.sp.param_list);
   q = pt_append_nulstring (parser, q, "(");
@@ -7707,18 +7748,25 @@ pt_print_create_stored_procedure (PARSER_CONTEXT * parser, PT_NODE * p)
 
   if (p->info.sp.type == PT_SP_FUNCTION)
     {
-      q = pt_append_nulstring (parser, q, parser->flag.is_unloading_schema ? " RETURN " : " return ");
-      if (p->info.sp.ret_data_type)
+      q = pt_append_nulstring (parser, q, parser->flag.is_unloading_plcsql_def ? " RETURN " : " return ");
+      if ((p->info.sp.body->info.sp_body.lang == SP_LANG_PLCSQL) && (p->info.sp.ret_type == PT_TYPE_RESULTSET))
 	{
-	  q = pt_append_varchar (parser, q, pt_print_bytes (parser, p->info.sp.ret_data_type));
+	  q = pt_append_nulstring (parser, q, "sys_refcursor");
 	}
       else
 	{
-	  q = pt_append_nulstring (parser, q, pt_show_type_enum (p->info.sp.ret_type));
+	  if (p->info.sp.ret_data_type)
+	    {
+	      q = pt_append_varchar (parser, q, pt_print_bytes (parser, p->info.sp.ret_data_type));
+	    }
+	  else
+	    {
+	      q = pt_append_nulstring (parser, q, pt_show_type_enum (p->info.sp.ret_type));
+	    }
 	}
     }
 
-  if (parser->flag.is_unloading_schema)
+  if (parser->flag.is_unloading_plcsql_def)
     {
       if (p->info.sp.auth_id == PT_AUTHID_OWNER)
 	{
@@ -7754,7 +7802,8 @@ pt_print_create_stored_procedure (PARSER_CONTEXT * parser, PT_NODE * p)
   r3 = pt_print_bytes (parser, p->info.sp.body);
   q = pt_append_varchar (parser, q, r3);
 
-  if (p->info.sp.comment != NULL && !parser->flag.is_unloading_schema)
+  // CBRD-26513 : do not print comment when unloading plcsql definition
+  if (p->info.sp.comment != NULL && !parser->flag.is_unloading_plcsql_def)
     {
       r1 = pt_print_bytes (parser, p->info.sp.comment);
       q = pt_append_nulstring (parser, q, " comment ");
@@ -8008,7 +8057,7 @@ pt_print_sp_parameter (PARSER_CONTEXT * parser, PT_NODE * p)
   r1 = pt_print_bytes (parser, p->info.sp_param.name);
   q = pt_append_varchar (parser, q, r1);
   q = pt_append_nulstring (parser, q, " ");
-  q = pt_append_nulstring (parser, q, parser->flag.is_unloading_schema ?
+  q = pt_append_nulstring (parser, q, parser->flag.is_unloading_plcsql_def ?
 			   (p->info.sp_param.mode == PT_INPUT || p->info.sp_param.mode == PT_NOPUT) ?
 			   "IN" : p->info.sp_param.mode == PT_OUTPUT ?
 			   "OUT" : "INOUT" : pt_show_misc_type (p->info.sp_param.mode));
@@ -8062,7 +8111,7 @@ static PARSER_VARCHAR *
 pt_print_sp_body (PARSER_CONTEXT * parser, PT_NODE * p)
 {
   PARSER_VARCHAR *q = NULL, *r1 = NULL;
-  q = pt_append_nulstring (parser, q, parser->flag.is_unloading_schema ? " AS\n" : " as ");
+  q = pt_append_nulstring (parser, q, parser->flag.is_unloading_plcsql_def ? " AS\n" : " as ");
   if (p->info.sp_body.lang == SP_LANG_PLCSQL)
     {
       r1 = pt_append_varchar (parser, r1, p->info.sp_body.impl->info.value.data_value.str);
@@ -8660,8 +8709,7 @@ pt_print_datatype (PARSER_CONTEXT * parser, PT_NODE * p)
 
     case PT_TYPE_NUMERIC:
       q = pt_append_nulstring (parser, q, pt_show_type_enum (p->type_enum));
-      if (p->info.data_type.precision != DB_DEFAULT_NUMERIC_PRECISION
-	  || p->info.data_type.dec_precision != DB_DEFAULT_NUMERIC_SCALE)
+      if (p->info.data_type.precision != DB_DEFAULT_NUMERIC_PRECISION)
 	{
 	  sprintf (buf, "(%d,%d)", p->info.data_type.precision, p->info.data_type.dec_precision);
 	  q = pt_append_nulstring (parser, q, buf);
@@ -8670,7 +8718,7 @@ pt_print_datatype (PARSER_CONTEXT * parser, PT_NODE * p)
 
     case PT_TYPE_CHAR:
     case PT_TYPE_VARCHAR:
-      if (parser->flag.is_unloading_schema)
+      if (parser->flag.is_unloading_plcsql_def)
 	{
 	  switch (p->type_enum)
 	    {
@@ -8705,6 +8753,7 @@ pt_print_datatype (PARSER_CONTEXT * parser, PT_NODE * p)
 	    /* fixed data type: always show parameter */
 	    show_precision = true;
 	    break;
+
 	  default:
 	    /* variable data type: only show non-maximum(i.e., default) parameter */
 	    if (precision == TP_FLOATING_PRECISION_VALUE)
@@ -8867,6 +8916,11 @@ pt_print_delete (PARSER_CONTEXT * parser, PT_NODE * p)
 	  q = pt_append_nulstring (parser, q, " NO_LOGGING");
 	}
 
+      if (p->info.delete_.hint & PT_HINT_BIND_SENSITIVE)
+	{
+	  /* replan when the bound values change histogram bucket */
+	  q = pt_append_nulstring (parser, q, " BIND_SENSITIVE");
+	}
       if (p->info.delete_.hint & PT_HINT_ORDERED)
 	{
 	  /* force join left-to-right */
@@ -10426,6 +10480,12 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       q = pt_append_nulstring (parser, q, " md5(");
       q = pt_append_varchar (parser, q, r1);
       q = pt_append_nulstring (parser, q, ")");
+      break;
+    case PT_UUID_FORMAT:
+      q = pt_append_nulstring (parser, q, " uuid_format(");
+      r1 = pt_print_bytes_l (parser, p->info.expr.arg1);
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ") ");
       break;
     case PT_AES_ENCRYPT:
       q = pt_append_nulstring (parser, q, " aes_encrypt(");
@@ -11999,6 +12059,13 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       q = pt_append_nulstring (parser, q, " sys_guid() ");
       break;
 
+    case PT_UUID:
+      q = pt_append_nulstring (parser, q, " uuid(");
+      r1 = pt_print_bytes_l (parser, p->info.expr.arg1);
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ") ");
+      break;
+
     case PT_PATH_EXPR_SET:
       r1 = pt_print_bytes_l (parser, p->info.expr.arg1);
       q = pt_append_varchar (parser, q, r1);
@@ -12113,6 +12180,34 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       r1 = pt_print_bytes (parser, p->info.expr.arg3);
       q = pt_append_varchar (parser, q, r1);
 
+      q = pt_append_nulstring (parser, q, ")");
+      break;
+
+    case PT_ESTIMATED_TABLE_ROWS:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " estimated_table_rows(");
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ")");
+      break;
+
+    case PT_ESTIMATED_AVG_ROW_LENGTH:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " estimated_avg_row_length(");
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ")");
+      break;
+
+    case PT_ESTIMATED_DATA_LENGTH:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " estimated_data_length(");
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ")");
+      break;
+
+    case PT_ESTIMATED_DATA_FREE:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " estimated_data_free(");
+      q = pt_append_varchar (parser, q, r1);
       q = pt_append_nulstring (parser, q, ")");
       break;
 
@@ -12377,6 +12472,12 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       q = pt_append_varchar (parser, q, r1);
       q = pt_append_nulstring (parser, q, ")");
       break;
+    case PT_COLLECTION_TO_STRING:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " collection_to_string(");
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ")");
+      break;
     }
 
   for (t = p->or_next; t; t = t->or_next)
@@ -12494,6 +12595,16 @@ pt_print_function (PARSER_CONTEXT * parser, PT_NODE * p)
   FUNC_CODE code;
   PARSER_VARCHAR *q = 0, *r1;
   PT_NODE *order_by = NULL;
+  unsigned int save_custom = parser->custom_print;
+
+  /* a function argument is never followed by "AS alias" in SQL syntax; an arg_list member's own
+   * alias_print may be set for unrelated bookkeeping (e.g. carried over from view/subquery
+   * merging), so it must not leak into the printed text here -- restored below, right before
+   * this call's own alias (if any) is appended. */
+  if (parser->flag.is_parsing_static_sql)
+    {
+      parser->custom_print &= ~PT_PRINT_ALIAS;
+    }
 
   code = p->info.function.function_type;
   if (code == PT_GENERIC)
@@ -12727,6 +12838,11 @@ pt_print_function (PARSER_CONTEXT * parser, PT_NODE * p)
 	  q = pt_append_varchar (parser, q, r1);
 	}
       q = pt_append_nulstring (parser, q, ")");
+    }
+
+  if (parser->flag.is_parsing_static_sql)
+    {
+      parser->custom_print = save_custom;
     }
 
   if ((parser->custom_print & PT_PRINT_ALIAS) && p->alias_print != NULL)
@@ -14508,6 +14624,11 @@ pt_print_select (PARSER_CONTEXT * parser, PT_NODE * p)
 		  q = pt_append_nulstring (parser, q, " ");
 		}
 	    }
+	  if (p->info.query.hint & PT_HINT_BIND_SENSITIVE)
+	    {
+	      /* replan when the bound values change histogram bucket */
+	      q = pt_append_nulstring (parser, q, "BIND_SENSITIVE ");
+	    }
 	  if (p->info.query.q.select.hint & PT_HINT_ORDERED)
 	    {
 	      /* force join left-to-right */
@@ -14702,9 +14823,9 @@ pt_print_select (PARSER_CONTEXT * parser, PT_NODE * p)
 	      q = pt_append_nulstring (parser, q, "NO_SUBQUERY_CACHE ");
 	    }
 
-	  if (p->info.query.q.select.hint & PT_HINT_NO_PARALLEL_HEAP_SCAN)
+	  if (p->info.query.q.select.hint & PT_HINT_NO_PARALLEL_SCAN)
 	    {
-	      q = pt_append_nulstring (parser, q, "NO_PARALLEL_HEAP_SCAN ");
+	      q = pt_append_nulstring (parser, q, "NO_PARALLEL_SCAN ");
 	    }
 
 	  if (p->info.query.q.select.hint & PT_HINT_NO_PARALLEL_SUBQUERY)
@@ -14759,11 +14880,6 @@ pt_print_select (PARSER_CONTEXT * parser, PT_NODE * p)
 	  if (p->info.query.q.select.hint & PT_HINT_SELECT_RECORD_INFO)
 	    {
 	      q = pt_append_nulstring (parser, q, "SELECT_RECORD_INFO ");
-	    }
-
-	  if (p->info.query.q.select.hint & PT_HINT_SAMPLING_SCAN)
-	    {
-	      q = pt_append_nulstring (parser, q, "SAMPLING_SCAN ");
 	    }
 
 	  if (p->info.query.q.select.hint & PT_HINT_SELECT_PAGE_INFO)
@@ -15812,6 +15928,11 @@ pt_print_update (PARSER_CONTEXT * parser, PT_NODE * p)
 	  b = pt_append_nulstring (parser, b, " NO_LOGGING");
 	}
 
+      if (p->info.update.hint & PT_HINT_BIND_SENSITIVE)
+	{
+	  /* replan when the bound values change histogram bucket */
+	  b = pt_append_nulstring (parser, b, " BIND_SENSITIVE");
+	}
       if (p->info.update.hint & PT_HINT_ORDERED)
 	{
 	  /* force join left-to-right */
@@ -16074,6 +16195,8 @@ static PARSER_VARCHAR *
 pt_print_update_stats (PARSER_CONTEXT * parser, PT_NODE * p)
 {
   PARSER_VARCHAR *b = 0, *r1;
+  const char *sep = " with ";
+  char buf[32];
 
   b = pt_append_nulstring (parser, b, "update statistics on ");
   if (p->info.update_stats.all_classes > 0)
@@ -16090,10 +16213,38 @@ pt_print_update_stats (PARSER_CONTEXT * parser, PT_NODE * p)
       b = pt_append_varchar (parser, b, r1);
     }
 
+  /* each option guards its own print; sep flips to ", " after the first one, so nothing is
+   * emitted when no option is set */
   if (p->info.update_stats.with_fullscan > 0)
     {
       assert (p->info.update_stats.with_fullscan == STATS_WITH_FULLSCAN);
-      b = pt_append_nulstring (parser, b, " with fullscan");
+      b = pt_append_nulstring (parser, b, sep);
+      b = pt_append_nulstring (parser, b, "fullscan");
+      sep = ", ";
+    }
+  if (p->info.update_stats.random_seed > 0)
+    {
+      b = pt_append_nulstring (parser, b, sep);
+      b = pt_append_nulstring (parser, b, "random seed");
+      sep = ", ";
+    }
+  if (p->info.update_stats.no_histogram > 0)
+    {
+      b = pt_append_nulstring (parser, b, sep);
+      b = pt_append_nulstring (parser, b, "no histogram");
+      sep = ", ";
+    }
+  if (p->info.update_stats.drop_histogram > 0)
+    {
+      b = pt_append_nulstring (parser, b, sep);
+      b = pt_append_nulstring (parser, b, "drop histogram");
+      sep = ", ";
+    }
+  if (p->info.update_stats.bucket_count > 0)
+    {
+      snprintf (buf, sizeof (buf), "%d buckets", p->info.update_stats.bucket_count);
+      b = pt_append_nulstring (parser, b, sep);
+      b = pt_append_nulstring (parser, b, buf);
     }
 
   return b;
@@ -18579,6 +18730,7 @@ pt_expr_is_allowed_as_function_index (const PT_NODE * expr)
     case PT_TO_DATETIME_TZ:
     case PT_TO_TIMESTAMP_TZ:
     case PT_CRC32:
+    case PT_UUID_FORMAT:
       return true;
     case PT_TZ_OFFSET:
     default:
@@ -19414,8 +19566,15 @@ pt_print_dblink_table (PARSER_CONTEXT * parser, PT_NODE * p)
       else
 	{
 	  /* For Query-cache:
-	   * Separate comments have been added 
+	   * Separate comments have been added
 	   * for cases where there is no change in the query but information on the server has changed. */
+	}
+    }
+  else
+    {
+      if (!pt->url || !pt->user || !pt->pwd)
+	{
+	  print_detail = false;
 	}
     }
 

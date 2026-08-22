@@ -179,7 +179,8 @@ extern BTID *xbtree_load_index (THREAD_ENTRY * thread_p, BTID * btid, const char
 				OID * class_oids, int n_classes, int n_attrs, int *attr_ids, int *attrs_prefix_length,
 				HFID * hfids, int unique_pk, int not_null_flag, OID * fk_refcls_oid,
 				BTID * fk_refcls_pk_btid, const char *fk_name, char *pred_stream, int pred_stream_size,
-				char *expr_stream, int expr_steram_size, int func_col_id, int func_attr_index_start);
+				char *expr_stream, int expr_steram_size, int func_col_id, int func_attr_index_start,
+				bool eligible_no_redo);
 extern BTID *xbtree_load_online_index (THREAD_ENTRY * thread_p, BTID * btid, const char *bt_name, TP_DOMAIN * key_type,
 				       OID * class_oids, int n_classes, int n_attrs, int *attr_ids,
 				       int *attrs_prefix_length, HFID * hfids, int unique_pk, int not_null_flag,
@@ -234,7 +235,7 @@ extern void xqmgr_dump_query_plans (THREAD_ENTRY * thread_p, FILE * outfp);
 extern void xqmgr_dump_query_cache (THREAD_ENTRY * thread_p, FILE * outfp);
 
 /* server execution statistics */
-extern void xperfmon_server_copy_stats (THREAD_ENTRY * thread_p, UINT64 * to_stats);
+extern void xperfmon_server_copy_stats (THREAD_ENTRY * thread_p, UINT64 * to_stats, bool need_pgbuf_stat);
 extern void xperfmon_server_copy_stats_for_trace (THREAD_ENTRY * thread_p, UINT64 * to_stats);
 extern void xperfmon_server_copy_global_stats (UINT64 * to_stats);
 /* catalog manager interface */
@@ -295,5 +296,15 @@ extern int xlocator_demote_class_lock (THREAD_ENTRY * thread_p, const OID * clas
 extern bool xtran_should_connection_reset (THREAD_ENTRY * thread_p, bool has_updated);
 extern int xsession_set_tran_auto_commit (THREAD_ENTRY * thread_p, bool auto_commit);
 extern void xsynonym_remove_xasl_by_oid (THREAD_ENTRY * thread_p, OID * oidp);
+
+extern int xlob_create_dir (THREAD_ENTRY * thread_p, HFID * hfid, int *attrid_arr, int attrid_arr_length);
+extern int xlob_remove_dir (THREAD_ENTRY * thread_p, HFID * hfid, int attrid);
+
+extern int xfile_tracker_dump_file_list (THREAD_ENTRY * thread_p, FILE * outfp, bool invalid_only);
+extern int xfile_tracker_clean_invalid_file (THREAD_ENTRY * thread_p, int *heap, int *heap_ovf, int *btree,
+					     int *btree_ovf);
+#if !defined(NDEBUG)
+extern int xfile_tracker_delete_target_file (THREAD_ENTRY * thread_p, const char *target_vfid_str);
+#endif
 
 #endif /* _XSERVER_INTERFACE_H_ */
