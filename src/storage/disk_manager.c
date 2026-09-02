@@ -3216,7 +3216,7 @@ disk_verify_volume_header (THREAD_ENTRY * thread_p, PAGE_PTR pgptr)
  * line (in)                : (debug only) caller line
  */
 STATIC_INLINE int
-disk_get_volheader_internal (THREAD_ENTRY * thread_p, VOLID volid, PGBUF_LATCH_MODE latch_mode,
+disk_get_volheader_internal (THREAD_ENTRY * thread_p, VOLID volid, PGBUF_LATCH_MODE latch_mode, // 전달된 volid를 fix하고, fix한 vol_header를 반환
 			     PAGE_PTR * page_volheader_out, DISK_VOLUME_HEADER ** volheader_out
 #if !defined (NDEBUG)
 			     , const char *file, int line
@@ -6308,7 +6308,7 @@ end:
  * purpose (in) : volume purpose
  */
 STATIC_INLINE bool
-disk_compatible_type_and_purpose (DB_VOLTYPE type, DB_VOLPURPOSE purpose)
+disk_compatible_type_and_purpose (DB_VOLTYPE type, DB_VOLPURPOSE purpose) // permanent || temp 타입 볼륨인지 확인
 {
   /* temporary type with permanent purpose is not compatible */
   return type == DB_PERMANENT_VOLTYPE || purpose == DB_TEMPORARY_DATA_PURPOSE;
